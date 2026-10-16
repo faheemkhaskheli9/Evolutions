@@ -178,6 +178,8 @@ impl Simulation {
         let doy = self.day_of_year();
         json!({
             "id": a.id,
+            "x": a.x,
+            "y": a.y,
             "species": a.species,
             "species_name": sp.name,
             "common_name": sp.common_name,
@@ -277,14 +279,16 @@ impl Simulation {
                 continue;
             }
             let (px, py) = (d.patch as usize % pw, d.patch as usize / pw);
+            // Spread each deme over its patch in proportion to food, as animals would be.
             let tiles: Vec<usize> = (py * ps..((py + 1) * ps).min(self.world.h))
                 .flat_map(|y| (px * ps..((px + 1) * ps).min(self.world.w)).map(move |x| (x, y)))
                 .map(|(x, y)| y * self.world.w + x)
                 .filter(|&i| self.world.is_land(i))
                 .collect();
-            let share = d.total() as f32 / tiles.len().max(1) as f32;
+            let food = |t: usize| 1.0 + self.world.forage_max[t] + self.world.roughage_max[t];
+            let total: f32 = tiles.iter().map(|&t| food(t)).sum();
             for t in tiles {
-                out[t] += share;
+                out[t] += d.total() as f32 * food(t) / total.max(1e-6);
             }
         }
     }
