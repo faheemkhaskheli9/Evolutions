@@ -128,8 +128,8 @@ pub struct PopSummary {
     pub arch: u16,
     pub patch: u32,
     pub n: u32,
-    /// Frequencies of derived alleles at incompatibility loci: (locus, allele, freq).
-    pub dmi: Vec<(u16, u32, f32)>,
+    /// Frequencies of derived alleles at incompatibility loci: (locus, allele uid, freq).
+    pub dmi: Vec<(u16, u64, f32)>,
     pub ornament: f32,
     pub preference: f32,
     pub choosiness: f32,
@@ -201,7 +201,7 @@ pub fn detect_splits(
     registry: &mut SpeciesRegistry,
     seed: u64,
     params: &crate::params::SimParams,
-    patches_w: usize,
+    connected: &dyn Fn(u32, u32) -> bool,
 ) -> Vec<Split> {
     let n = pops.len();
     let mut dsu = Dsu((0..n).collect());
@@ -252,15 +252,9 @@ pub fn detect_splits(
         sig.sort_by(|a, b| b.0.cmp(&a.0).then(a.1[0].cmp(&b.1[0])));
         let main: Vec<u32> = sig[0].1.iter().map(|&i| pops[i].patch).collect();
         for (_, members) in sig.into_iter().skip(1) {
-            let adjacent = members.iter().any(|&i| {
-                let p = pops[i].patch as i64;
-                main.iter().any(|&q| {
-                    let q = q as i64;
-                    let (px, py) = (p % patches_w as i64, p / patches_w as i64);
-                    let (qx, qy) = (q % patches_w as i64, q / patches_w as i64);
-                    (px - qx).abs() <= 1 && (py - qy).abs() <= 1
-                })
-            });
+            let adjacent = members
+                .iter()
+                .any(|&i| main.iter().any(|&q| connected(pops[i].patch, q)));
             let cause = if adjacent {
                 "parapatric/sympatric divergence (reproductive isolation without a barrier)"
             } else {
@@ -281,16 +275,16 @@ pub fn dmi_freqs<'a>(
     table: &AlleleTable,
     dmi_loci: &[usize],
     genomes: impl Iterator<Item = &'a crate::genetics::Genome>,
-) -> Vec<(u16, u32, f32)> {
-    let mut counts: BTreeMap<(u16, u32), u32> = BTreeMap::new();
+) -> Vec<(u16, u64, f32)> {
+    let mut counts: BTreeMap<(u16, u64), u32> = BTreeMap::new();
     let mut n = 0u32;
     for g in genomes {
         n += 2;
         for &l in dmi_loci {
             for h in 0..2 {
-                let id = g.hap[h][l];
-                if table.get(id).derived {
-                    *counts.entry((l as u16, id)).or_default() += 1;
+                let a = table.get(g.hap[h][l]);
+                if a.derived {
+                    *counts.entry((l as u16, a.uid)).or_default() += 1;
                 }
             }
         }

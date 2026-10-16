@@ -63,7 +63,7 @@ pub fn templates() -> Vec<WorldTemplate> {
             name: "Earth-like Continent".into(),
             description: "Temperate default: continents, mountain ranges, rivers and a balanced grazer–predator community.".into(),
             gen: WorldGenParams { lat_north: 65.0, lat_south: -10.0, land_fraction: 0.45, ..base.clone() },
-            founders: vec![g("hare", 400, 0.8), g("deer", 60, 0.8), later("wolf", 60, 40.0)],
+            founders: vec![g("hare", 400, 0.8), g("deer", 150, 0.8), later("wolf", 60, 40.0)],
         },
         WorldTemplate {
             key: "archipelago".into(),
@@ -80,7 +80,7 @@ pub fn templates() -> Vec<WorldTemplate> {
             name: "Pangaea".into(),
             description: "One supercontinent with a dry interior.".into(),
             gen: WorldGenParams { shape: LandShape::Supercontinent, land_fraction: 0.35, ..base.clone() },
-            founders: vec![g("hare", 400, 0.8), g("deer", 60, 0.8), later("wolf", 50, 40.0), later("cat", 40, 40.0)],
+            founders: vec![g("hare", 400, 0.8), g("deer", 150, 0.8), later("wolf", 50, 40.0), later("cat", 40, 40.0)],
         },
         WorldTemplate {
             key: "ice_age".into(),
@@ -89,7 +89,7 @@ pub fn templates() -> Vec<WorldTemplate> {
             gen: WorldGenParams {
                 lat_north: 75.0, lat_south: 30.0, temp_offset: -6.0, land_fraction: 0.6, ..base.clone()
             },
-            founders: vec![g("hare", 400, 0.8), g("deer", 60, 0.8), later("wolf", 60, 40.0)],
+            founders: vec![g("hare", 400, 0.8), g("deer", 150, 0.8), later("wolf", 60, 40.0)],
         },
         WorldTemplate {
             key: "rift".into(),
@@ -123,7 +123,7 @@ pub fn templates() -> Vec<WorldTemplate> {
                 lat_north: 40.0, lat_south: 5.0, precip_factor: 0.35, temp_offset: 3.0,
                 land_fraction: 0.55, ..base.clone()
             },
-            founders: vec![g("hare", 300, 0.8), g("deer", 40, 0.8), later("cat", 40, 40.0)],
+            founders: vec![g("hare", 300, 0.8), g("deer", 150, 0.8), later("cat", 40, 40.0)],
         },
         WorldTemplate {
             key: "blank".into(),
@@ -170,7 +170,7 @@ pub fn random(seed: u64) -> WorldTemplate {
         axial_tilt: r.range_f32(10.0, 35.0) as f64,
         ..WorldGenParams::default()
     };
-    let mut founders = vec![g("hare", 400, 0.8), g("deer", 60, 0.8)];
+    let mut founders = vec![g("hare", 400, 0.8), g("deer", 150, 0.8)];
     founders.push(if r.chance(0.5) {
         later("wolf", 60, 40.0)
     } else {

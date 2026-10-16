@@ -210,7 +210,7 @@ impl Simulation {
         MutationRates {
             functional: mu,
             neutral: mu * self.params.neutral_rate_factor,
-            dmi: mu,
+            dmi: mu * self.params.dmi_rate_factor,
             large_effect_fraction: self.params.large_effect_fraction,
         }
     }
@@ -784,7 +784,34 @@ impl Simulation {
         let pw = self.patches_w();
         let seed = self.seed;
         let params = self.params.clone();
-        let splits = crate::species::detect_splits(&pops, &mut self.species, seed, &params, pw);
+        let (world, ps) = (&self.world, self.params.patch_size);
+        // Two patches are connected if they are the same or share a land border.
+        let connected = |a: u32, b: u32| -> bool {
+            if a == b {
+                return true;
+            }
+            let (ax, ay) = ((a as usize % pw) as i64, (a as usize / pw) as i64);
+            let (bx, by) = ((b as usize % pw) as i64, (b as usize / pw) as i64);
+            let mut dx = bx - ax;
+            if dx > pw as i64 / 2 {
+                dx -= pw as i64;
+            } else if dx < -(pw as i64) / 2 {
+                dx += pw as i64;
+            }
+            let dy = by - ay;
+            dx.abs() <= 1
+                && dy.abs() <= 1
+                && crate::population::border_connectivity(
+                    world,
+                    ps,
+                    ax as usize,
+                    ay as usize,
+                    dx,
+                    dy,
+                ) > 0.0
+        };
+        let splits =
+            crate::species::detect_splits(&pops, &mut self.species, seed, &params, &connected);
         for s in splits {
             let parent = self.species.get(s.parent).clone();
             let members: std::collections::BTreeSet<usize> = s.members.iter().copied().collect();
