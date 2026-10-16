@@ -671,7 +671,9 @@ impl Simulation {
                 lo[t] -= delta;
                 let wh = fitness(&Phenotype::from_latent(&hi), pc, &e, bg, base.fecundity);
                 let wl = fitness(&Phenotype::from_latent(&lo), pc, &e, bg, base.fecundity);
-                *b = ((wh.ln() - wl.ln()) / (2.0 * delta)).clamp(-3.0, 3.0);
+                // Gradients per latent unit, capped at strengths seen in nature
+                // (|β| ≲ 0.5 per phenotypic SD; Kingsolver et al. 2001).
+                *b = ((wh.ln() - wl.ln()) / (2.0 * delta)).clamp(-1.0, 1.0);
             }
             for &li in &arch.trait_loci {
                 let pool = &mut deme.freqs[li];
@@ -691,7 +693,7 @@ impl Simulation {
                             excess += beta[t as usize] * (al.effects[s].1 - mean_e[s]);
                         }
                     }
-                    *p = (*p * (1.0 + excess.clamp(-0.5, 0.5))).max(0.0);
+                    *p = (*p * (1.0 + excess.clamp(-0.2, 0.2))).max(0.0);
                 }
                 normalise(pool);
             }

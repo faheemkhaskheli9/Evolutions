@@ -1,0 +1,116 @@
+# Evolutions
+
+A realistic simulation of biological evolution. Build a world (random, from a template, or your own settings), release animals and early humans, and watch them eat, drink, hunt, flee, court, breed, age and die. Fast-forward through deep time to see what the forces of real evolution make of them: natural and sexual selection, genetic drift, mutation, gene flow and speciation.
+
+Nothing is scripted. Thick fur in the cold, thin coats in the desert, island populations becoming new species, predators wiping out scarce prey: all of these emerge from genes, bodies, food, climate and chance.
+
+- **Design documents:** [PRD](docs/PRD.md) · [TRD](docs/TRD.md) · [System Design](docs/SYSTEM_DESIGN.md)
+- **Engine:** Rust (`engine/`). Headless CLI, scientific validation suite, and WebAssembly build.
+- **App:** browser UI (`app/web/`). React and TypeScript; the engine runs in a Web Worker.
+
+## Quick start
+
+### Browser app
+
+Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.129, and Node 20+.
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129
+cd app/web
+npm install
+npm run build:wasm    # compile the engine to WebAssembly
+npm run dev           # open the printed URL
+```
+
+In the app:
+- Pick a template (or **Random world**), adjust the founder species, and press **Create world**.
+- Press **Space** or ▶ to run time.
+- Click an animal to inspect it. Scroll to zoom, drag to pan.
+- **Jump ahead** (+100 to +100k years) fast-forwards in Population mode.
+- In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
+- The **World** tab has map layers and interventions (climate shift, meteor, introduced species, epidemic).
+- **Save** and **Open** store whole worlds in `.evo` files.
+
+### Headless CLI
+
+```bash
+cd engine
+cargo run --release -p evo-cli -- list                       # templates and species
+cargo run --release -p evo-cli -- run --template ice_age --seed 7 --years 2000 \
+    --csv out/ --newick out/tree.nwk --out out/run.evo
+cargo run --release -p evo-cli -- info out/run.evo
+```
+
+`--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity), which is useful for understanding *why* a population grows or declines.
+
+## What is simulated
+
+| Area | Model (details in the TRD) |
+|---|---|
+| World | Plate-like terrain, lapse-rate and latitude climate, seasons from axial tilt, moisture advection with rain shadows, rivers and lakes, Whittaker biomes, Miami-model productivity with high-quality and coarse forage |
+| Genetics | Diploid genomes with 8 mapped chromosomes and ~170 loci; meiosis with crossing over; mutation (continuum-of-alleles); dominance; pleiotropy; neutral markers; Dobzhansky–Muller incompatibility loci |
+| Traits | 21 heritable traits: body mass, insulation, appendages, legs, muscle type, diet, coat colour, senses, brain size, behaviour, litter size, pace of life, maintenance, ornaments and preferences, breeding season, dispersal, kidney, heat tolerance |
+| Physiology | Kleiber metabolism, thermal conductance, behavioural thermoregulation, water balance, West ontogenetic growth, Gompertz–Makeham ageing, Taylor locomotion costs, Hirt top speed, expensive-tissue brain cost, size-dependent fibre digestion (Jarman–Bell) |
+| Behaviour (Individual mode) | Utility AI with heritable weights: forage, drink, hunt, scavenge, flee, rest, seek mates (with mate choice), nurse, follow mother, herd, disperse |
+| Ecology | Grazing and plant regrowth, predation (analytic chases in Individual mode; ratio-dependent type III response with satiation, prey refuges and scavenging in Population mode), competition, carrion |
+| Evolution at scale (Population mode) | Age- and sex-structured demes per 8×8-tile patch; selection gradients from the same physiology functions; Wright–Fisher drift; mutation; migration along land borders, plus rare rafting |
+| Species | Automatic detection by reproductive compatibility (biological species concept), with hysteresis; allopatric vs parapatric/sympatric cause; generated binomial names; phylogeny with Newick export |
+| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps), switched automatically by speed; focus regions; deterministic replay; save/load |
+
+## Validation
+
+`cargo test --release` (in `engine/`) runs the fast scientific suite on every change:
+
+| Test | Checks |
+|---|---|
+| V-G1 Hardy–Weinberg | Genotype frequencies after random mating fit p², 2pq, q² |
+| V-G2 Neutral fixation | A new neutral allele fixes with probability ≈ 1/(2N) |
+| V-G3 Drift | Heterozygosity decays as H₀(1 − 1/2N)ᵗ |
+| V-G4 Kimura | A beneficial allele fixes with probability (1 − e^−2s)/(1 − e^−4Ns) |
+| V-G5 Breeder's equation | Response to truncation selection ≈ h²·S |
+| V-G6 Haldane | Recombination fraction matches Haldane's map function |
+| Determinism, save/load | Same seed gives the same history; a reloaded world continues identically |
+| V-P1 Transitions | Individual ↔ Population switches conserve abundance, mean genetic values and diversity |
+
+`cargo test --release -- --ignored` also runs the long ecological tests:
+- **V-B1 cold-adaptation cline:** from the same founders, northern hares evolve thicker insulation than southern ones; this holds in 5/5 seeds.
+- **V-S1 allopatric speciation:** populations separated by straits accumulate incompatibilities and are detected as separate species.
+
+The browser app has an end-to-end smoke test: `npm run build && npm run test:e2e`.
+
+## Implementation status (v0.1)
+
+This version implements the must-have scope of the PRD, plus several later items. Where it differs from the design documents:
+
+| Design document says | v0.1 does | Why / next step |
+|---|---|---|
+| Three fidelity modes (Individual, Population, Macro) | Individual and Population only | Macro mode (species-level, 1,000-year steps) is the next milestone. Population mode runs at about 30–70 simulated years per second natively (single-threaded, depending on world size; somewhat slower in the browser), so tens of thousands of years take minutes. |
+| 15-minute ticks; ≥ 100,000 animals on 8 cores | 1-hour ticks; single-threaded; about 0.2 µs per animal per tick; cap of 25,000 individuals (larger worlds use focus regions) | Parallel systems (rayon) are planned for native builds. |
+| ECS (`bevy_ecs`), FlatBuffers, SQLite saves, Tauri desktop shell | Plain Rust structs; JSON plus typed arrays between worker and UI; bincode `.evo` saves; browser app only | These keep the MVP small. The engine API is ready to be wrapped by a desktop shell. |
+| Hominin traits (bipedalism, culture, pigmentation) | Hominins and apes use the general trait set (brain size, sociality, sweating, diet …) | Cultural evolution and hominin-specific traits are planned (PRD §7.5, P1). |
+| Disease with pathogen genomes | Epidemics as an intervention only | Planned (P1). |
+| "Why?" explanations | Per-deme vital-rate diagnostics (CLI `--debug`, WASM `diagnostics()`) | Plain-language explanations in the UI are planned. |
+
+**Modelling notes**
+- **Population scale:** a tile is tens to hundreds of kilometres wide for climate, while `habitat_m2_per_tile` sets how many animals it supports. Absolute numbers are scaled down; ratios and dynamics are what matter.
+- **Mutation rates:** the default *Accelerated* setting multiplies literature mutation rates by 20 and is always shown in the UI. *Strict* uses literature rates.
+- **Population mode:** to bound cost, each deme tracks at most one new allele per locus and a capped number of new mutations per year. In large demes almost all untracked mutations would be lost to drift anyway.
+- **Predators are fragile, as they are in nature.** Whether they persist depends on prey energy and on the world. In the Earth template wolves usually coexist with hares and deer, sometimes driving deer extinct through apparent competition. In harsher templates they often die out.
+- **Speciation is slow at realistic population sizes.** It is fastest in small isolated populations, such as islands.
+
+## Repository layout
+
+```text
+docs/                  PRD, TRD, System Design
+engine/
+  evo-engine/          simulation library (world, genetics, physiology, individual & population modes, species, API)
+  evo-engine/tests/    scientific validation suite
+  evo-cli/             headless runner (`evo`)
+  evo-wasm/            WebAssembly bindings
+app/web/               browser app (React + Vite), engine worker, e2e smoke test
+```
+
+## License
+
+MIT
