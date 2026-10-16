@@ -28,6 +28,10 @@ pub struct SimParams {
     pub mutation_multiplier: f64,
     /// Neutral marker loci mutate faster (microsatellite-like) to act as a clock.
     pub neutral_rate_factor: f64,
+    /// Mutation rate of incompatibility loci relative to functional loci. Lower rates let
+    /// each new incompatibility allele sweep within a connected population before the next
+    /// arises (with accelerated rates, competing alleles otherwise purge each other).
+    pub dmi_rate_factor: f64,
     /// Fraction of new mutations with large effect.
     pub large_effect_fraction: f64,
     /// Probability a pair of derived alleles at two incompatibility loci is incompatible (Orr 1995).
@@ -72,8 +76,9 @@ impl Default for SimParams {
             mutation_rate: 1e-5,
             mutation_multiplier: 20.0,
             neutral_rate_factor: 5.0,
+            dmi_rate_factor: 0.1,
             large_effect_fraction: 0.05,
-            dmi_probability: 0.05,
+            dmi_probability: 0.1,
             dmi_cost: 0.35,
             habitat_m2_per_tile: 30000.0,
             forage_kj_per_g: 18.0,

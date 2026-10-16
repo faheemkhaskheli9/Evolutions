@@ -10,7 +10,7 @@
 //!    mutation, and stepping-stone migration (with rare rafting).
 
 use crate::animal::{Animal, Sex};
-use crate::genetics::{incompatible, AlleleTable, Genome, GenomeArch, NO_TRAIT};
+use crate::genetics::{incompatible, AlleleTable, Genome, GenomeArch, LocusKind, NO_TRAIT};
 use crate::physiology::{
     camouflage, derive, gompertz_hazard, mate_acceptance, roughage_quality, thermal, Derived,
     EVAP_J_PER_G, TISSUE_KJ_PER_KG,
@@ -25,8 +25,10 @@ use std::collections::BTreeMap;
 pub const AGE_CLASSES: usize = 40;
 /// Rare-allele tail kept per locus per deme (bounds cost in very large demes).
 pub const MAX_ALLELES_PER_LOCUS: usize = 16;
-/// New mutations tracked per deme per year (see the mutation step).
-pub const MAX_NEW_MUTATIONS: u64 = 6;
+/// New functional (trait + incompatibility) and neutral-marker alleles tracked per
+/// deme per year (see the mutation step).
+pub const MAX_NEW_FUNCTIONAL: u32 = 24;
+pub const MAX_NEW_NEUTRAL: u32 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Deme {
@@ -173,6 +175,10 @@ struct PatchCtx {
     /// Sustainable offtake of high-quality and coarse forage, g / yr.
     plant_supply_g: f32,
     rough_supply_g: f32,
+    /// Land connectivity to each of the 8 neighbouring patches (index (dy+1)*3+(dx+1)):
+    /// the fraction of border tiles where land touches land. Water and the poles block
+    /// dispersal; only rare rafting crosses them.
+    conn: [f32; 9],
 }
 
 /// Ecological context of one deme for the year.
@@ -185,6 +191,8 @@ struct Eco {
     mean_pref: f32,
     mean_choosy: f32,
     mean_acc: f32,
+    /// Intake capacity ÷ energy need at the deme's mean phenotype (0 = not set).
+    mean_supply: f32,
 }
 
 #[derive(Clone, Copy, Default, Debug, Serialize)]
@@ -264,7 +272,15 @@ fn annual(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
     } else {
         1.0
     };
-    let food = (eco.food_ratio * eff_rel).clamp(0.0, 1.5);
+    // Food is shared, but an animal whose needs are high relative to what its gut can
+    // process (e.g. a small or thin-coated body in the cold) fares worse than average.
+    let supply = d.max_intake_kj_day * 365.25 / (need + 0.5 * repro_kj).max(1.0);
+    let rel = if eco.mean_supply > 0.0 {
+        (supply / eco.mean_supply).clamp(0.2, 3.0)
+    } else {
+        1.0
+    };
+    let food = (eco.food_ratio * eff_rel * rel).clamp(0.0, 1.5);
     let starve = if food < 1.0 {
         -1.5 * food.max(0.02).ln()
     } else {
@@ -357,6 +373,15 @@ impl Simulation {
             pc.luminance = lum / n;
             pc.cover = cov / n;
             pc.diurnal = 3.0 + 6.0 * dry / n;
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    pc.conn[((dy + 1) * 3 + dx + 1) as usize] =
+                        border_connectivity(w, ps, px, py, dx, dy);
+                }
+            }
         }
         out
     }
@@ -611,6 +636,7 @@ impl Simulation {
                     mean_pref: pref,
                     mean_choosy: choosy,
                     mean_acc: mate_acceptance(pref, choosy, means[k].get(Trait::Ornament)),
+                    mean_supply: dd.max_intake_kj_day * 365.25 / base_need[k].max(1.0),
                 };
             }
         }
@@ -671,18 +697,19 @@ impl Simulation {
             }
             // Selection against incompatible combinations within the deme. Alleles rarer
             // than 0.5% are ignored here (they almost never meet a partner).
-            let common: Vec<(usize, u32, f32)> = arch
+            let common: Vec<(usize, u32, f32, u64)> = arch
                 .dmi_loci
                 .iter()
                 .flat_map(|&l| deme.freqs[l].iter().map(move |&(a, p)| (l, a, p)))
                 .filter(|&(_, a, p)| p > 0.005 && self.alleles.get(a).derived)
+                .map(|(l, a, p)| (l, a, p, self.alleles.get(a).uid))
                 .collect();
             if common.len() > 1 {
-                for &(l, a, _) in &common {
+                for &(l, a, _, ua) in &common {
                     let cost: f32 = common
                         .iter()
-                        .filter(|&&(lb, b, _)| lb != l && incompatible(seed, a, b, dmi_p))
-                        .map(|&(_, _, q)| 2.0 * q * dmi_s as f32)
+                        .filter(|&&(lb, _, _, ub)| lb != l && incompatible(seed, ua, ub, dmi_p))
+                        .map(|&(_, _, q, _)| 2.0 * q * dmi_s as f32)
                         .sum();
                     if cost > 0.0 {
                         let pool = &mut deme.freqs[l];
@@ -749,26 +776,31 @@ impl Simulation {
                 multinomial_resample(pool, copies, &mut rng);
                 prune_rare(pool, MAX_ALLELES_PER_LOCUS);
             }
-            // Mutation. The expected number of new mutations in the deme is 2·B·μ summed over
-            // loci; at most MAX_NEW_MUTATIONS are tracked per year (in large demes the rest
-            // would almost all be lost to drift within a few generations anyway).
+            // Mutation. Each locus gets Poisson(2·B·μ) new mutations. To bound cost in very
+            // large demes, at most one new allele per locus and MAX_NEW_FUNCTIONAL (trait +
+            // incompatibility) plus MAX_NEW_NEUTRAL (marker) alleles are tracked per year;
+            // in such demes the untracked ones would almost all be lost to drift anyway.
             let new_copies = 2 * births;
             if new_copies > 0 {
-                let lt = arch.trait_loci.len() as f64 * rates.functional;
-                let ln = arch.neutral_loci.len() as f64 * rates.neutral;
-                let ld = arch.dmi_loci.len() as f64 * rates.dmi;
-                let k = rng
-                    .poisson(new_copies as f64 * (lt + ln + ld))
-                    .min(MAX_NEW_MUTATIONS);
-                for _ in 0..k {
-                    let r = rng.f64() * (lt + ln + ld);
-                    let li = if r < lt {
-                        arch.trait_loci[rng.below(arch.trait_loci.len())]
-                    } else if r < lt + ln {
-                        arch.neutral_loci[rng.below(arch.neutral_loci.len())]
-                    } else {
-                        arch.dmi_loci[rng.below(arch.dmi_loci.len())]
+                let mut budget_f = MAX_NEW_FUNCTIONAL;
+                let mut budget_n = MAX_NEW_NEUTRAL;
+                let start = rng.below(arch.loci.len());
+                for off in 0..arch.loci.len() {
+                    let li = (start + off) % arch.loci.len();
+                    let (mu, neutral) = match arch.loci[li].kind {
+                        LocusKind::Trait(_) => (rates.functional, false),
+                        LocusKind::Neutral => (rates.neutral, true),
+                        LocusKind::Dmi => (rates.dmi, false),
                     };
+                    let budget = if neutral {
+                        &mut budget_n
+                    } else {
+                        &mut budget_f
+                    };
+                    if *budget == 0 || rng.poisson(new_copies as f64 * mu) == 0 {
+                        continue;
+                    }
+                    *budget -= 1;
                     let pool = &deme.freqs[li];
                     let weights: Vec<f64> = pool.iter().map(|x| x.1 as f64).collect();
                     let parent = pool[rng.weighted(&weights)].0;
@@ -802,6 +834,8 @@ impl Simulation {
             let rate = ((disp_km / patch_km).clamp(0.0, 0.5) * 0.5 + 0.5 * hunger).min(0.6);
             let (px, py) = (deme.patch as i64 % pw, deme.patch as i64 / pw);
             let mut targets = vec![];
+            let mut weights = vec![];
+            let here = &ctxs[deme.patch as usize];
             for dy in -1..=1 {
                 for dx in -1..=1 {
                     if dx == 0 && dy == 0 {
@@ -813,20 +847,22 @@ impl Simulation {
                     }
                     let nx = (px + dx).rem_euclid(pw);
                     let t = (ny * pw + nx) as usize;
-                    if ctxs[t].land.len() >= 2
-                        && ctxs[t].plant_supply_g + ctxs[t].rough_supply_g > 0.0
-                    {
+                    let c = here.conn[((dy + 1) * 3 + dx + 1) as usize];
+                    if c > 0.0 && ctxs[t].plant_supply_g + ctxs[t].rough_supply_g > 0.0 {
                         targets.push(t as u32);
+                        weights.push(c as f64);
                     }
                 }
             }
-            let emig = rng.binomial(n as u64, rate as f64) as u32;
+            let open = (weights.iter().sum::<f64>() / 4.0).min(1.0);
+            let emig = rng.binomial(n as u64, rate as f64 * open) as u32;
             if !targets.is_empty() && emig > 0 {
-                // Emigrants go to two random neighbouring patches this year (same expected flow).
+                // Emigrants go to two neighbouring patches this year, chosen in proportion
+                // to how well connected they are (same expected flow).
                 let picks = targets.len().min(2);
                 let each = emig / picks as u32;
                 for _ in 0..picks {
-                    let t = targets[rng.below(targets.len())];
+                    let t = targets[rng.weighted(&weights)];
                     if each > 0 {
                         moves.push((k, t, each));
                     }
@@ -1062,6 +1098,7 @@ impl Simulation {
                     .iter()
                     .flat_map(|&l| d.freqs[l].iter().map(move |&(a, f)| (l as u16, a, f)))
                     .filter(|&(_, a, f)| f > 0.0 && self.alleles.get(a).derived)
+                    .map(|(l, a, f)| (l, self.alleles.get(a).uid, f))
                     .collect();
                 PopSummary {
                     key: k,
@@ -1078,6 +1115,52 @@ impl Simulation {
             })
             .collect();
         (pops, BTreeMap::new())
+    }
+}
+
+/// Fraction of the border between patch (px, py) and its neighbour in direction
+/// (dx, dy) where a land tile touches a land tile.
+pub(crate) fn border_connectivity(
+    w: &crate::world::World,
+    ps: usize,
+    px: usize,
+    py: usize,
+    dx: i64,
+    dy: i64,
+) -> f32 {
+    let (ww, hh) = (w.w as i64, w.h as i64);
+    let x0 = (px * ps) as i64;
+    let y0 = (py * ps) as i64;
+    let x1 = ((px + 1) * ps).min(w.w) as i64 - 1;
+    let y1 = ((py + 1) * ps).min(w.h) as i64 - 1;
+    let land = |x: i64, y: i64| -> bool {
+        if y < 0 || y >= hh {
+            return false;
+        }
+        w.is_land((y * ww + x.rem_euclid(ww)) as usize)
+    };
+    let mut pairs = vec![];
+    match (dx, dy) {
+        (1, 0) => (y0..=y1).for_each(|y| pairs.push(((x1, y), (x1 + 1, y)))),
+        (-1, 0) => (y0..=y1).for_each(|y| pairs.push(((x0, y), (x0 - 1, y)))),
+        (0, 1) => (x0..=x1).for_each(|x| pairs.push(((x, y1), (x, y1 + 1)))),
+        (0, -1) => (x0..=x1).for_each(|x| pairs.push(((x, y0), (x, y0 - 1)))),
+        (dx, dy) => {
+            let cx = if dx > 0 { x1 } else { x0 };
+            let cy = if dy > 0 { y1 } else { y0 };
+            pairs.push(((cx, cy), (cx + dx, cy + dy)));
+        }
+    }
+    let n = pairs.len().max(1) as f32;
+    let k = pairs
+        .iter()
+        .filter(|(a, b)| land(a.0, a.1) && land(b.0, b.1))
+        .count() as f32;
+    if dx != 0 && dy != 0 {
+        // Diagonal neighbours touch at a corner only.
+        k / n * 0.25
+    } else {
+        k / n
     }
 }
 

@@ -31,6 +31,9 @@ pub struct Locus {
 /// One allele: its effects on up to two traits (pleiotropy) and its dominance.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Allele {
+    /// Permanent identity (survives allele-table compaction); used for incompatibilities.
+    #[serde(default)]
+    pub uid: u64,
     pub locus: u16,
     pub parent: u32,
     pub origin_year: f32,
@@ -44,10 +47,15 @@ pub struct Allele {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AlleleTable {
     pub alleles: Vec<Allele>,
+    #[serde(default)]
+    pub next_uid: u64,
 }
 
 impl AlleleTable {
-    pub fn push(&mut self, a: Allele) -> u32 {
+    /// Appends an allele, assigning it a fresh permanent uid. Returns its table id.
+    pub fn push(&mut self, mut a: Allele) -> u32 {
+        a.uid = self.next_uid;
+        self.next_uid += 1;
         self.alleles.push(a);
         (self.alleles.len() - 1) as u32
     }
@@ -209,6 +217,7 @@ impl GenomeArch {
                             None => [(t, e), (NO_TRAIT, 0.0)],
                         };
                         ids.push(table.push(Allele {
+                            uid: 0,
                             locus: li as u16,
                             parent: NO_PARENT,
                             origin_year: 0.0,
@@ -221,6 +230,7 @@ impl GenomeArch {
                 LocusKind::Neutral => {
                     for _ in 0..(k + 1) {
                         ids.push(table.push(Allele {
+                            uid: 0,
                             locus: li as u16,
                             parent: NO_PARENT,
                             origin_year: 0.0,
@@ -232,6 +242,7 @@ impl GenomeArch {
                 }
                 LocusKind::Dmi => {
                     ids.push(table.push(Allele {
+                        uid: 0,
                         locus: li as u16,
                         parent: NO_PARENT,
                         origin_year: 0.0,
@@ -354,6 +365,7 @@ impl GenomeArch {
             dominance = rng.normal_f32(0.45, 0.2).clamp(0.0, 1.0);
         }
         table.push(Allele {
+            uid: 0,
             locus: locus as u16,
             parent,
             origin_year: year,
@@ -401,9 +413,10 @@ fn add_locus(v: &mut [f32; N_TRAITS], a: &Allele, b: &Allele, hbar: f32) {
 
 /// Whether two derived incompatibility alleles clash (deterministic in the world seed).
 #[inline]
-pub fn incompatible(seed: u64, a: u32, b: u32, p: f64) -> bool {
+/// Takes allele *uids*, so the relationship never changes when the table is compacted.
+pub fn incompatible(seed: u64, a: u64, b: u64, p: f64) -> bool {
     let (x, y) = if a < b { (a, b) } else { (b, a) };
-    hash_unit(hash4(seed, x as u64, y as u64, 0xD3A1)) < p
+    hash_unit(hash4(seed, x, y, 0xD3A1)) < p
 }
 
 /// Hybrid viability multiplier (1 - s)^n for n incompatible pairs (TRD TR-G10).
@@ -415,12 +428,12 @@ pub fn dmi_viability(
     p: f64,
     s: f64,
 ) -> f64 {
-    let mut derived: Vec<(u16, u32)> = Vec::with_capacity(8);
+    let mut derived: Vec<(u16, u64)> = Vec::with_capacity(8);
     for &li in &arch.dmi_loci {
         for h in 0..2 {
-            let id = g.hap[h][li];
-            if table.get(id).derived && !derived.iter().any(|&(_, x)| x == id) {
-                derived.push((li as u16, id));
+            let a = table.get(g.hap[h][li]);
+            if a.derived && !derived.iter().any(|&(_, x)| x == a.uid) {
+                derived.push((li as u16, a.uid));
             }
         }
     }
