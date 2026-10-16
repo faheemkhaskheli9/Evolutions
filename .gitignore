@@ -1,0 +1,10 @@
+# Rust
+engine/target/
+# Node
+node_modules/
+app/web/dist/
+app/web/src/wasm/
+# Saves and exports from local runs
+*.evo
+/metrics/
+.DS_Store
