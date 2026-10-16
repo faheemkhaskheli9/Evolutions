@@ -1,0 +1,14 @@
+[package]
+name = "evo-wasm"
+description = "WebAssembly bindings for the Evolutions engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+evo-engine = { path = "../evo-engine" }
+serde_json.workspace = true
+wasm-bindgen = "=0.2.129"
