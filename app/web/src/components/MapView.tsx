@@ -179,7 +179,10 @@ export function MapView(props: Props) {
       const x0 = v.ox + k * span;
       ctx.drawImage(terrain, x0, v.oy, span, world.h * v.scale);
       if (overlay) ctx.drawImage(overlay, x0, v.oy, span, world.h * v.scale);
-      if (demeCanvas.current && (f.mode === "Population" || f.focus || layer === "population")) {
+      // Species ranges sit on the terrain view (or are the density layer itself); climate
+      // and vegetation layers are shown on their own so they stay readable.
+      const rangesVisible = layer === "terrain" || layer === "population";
+      if (demeCanvas.current && rangesVisible && (f.mode === "Population" || f.focus || layer === "population")) {
         ctx.drawImage(demeCanvas.current, x0, v.oy, span, world.h * v.scale);
       }
     }

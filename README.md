@@ -4,6 +4,7 @@ A realistic simulation of biological evolution. Build a world (random, from a te
 
 Nothing is scripted. Thick fur in the cold, thin coats in the desert, island populations becoming new species, predators wiping out scarce prey: all of these emerge from genes, bodies, food, climate and chance.
 
+- **User guide:** [every feature, step by step, with screenshots](docs/USER_GUIDE.md)
 - **Design documents:** [PRD](docs/PRD.md) · [TRD](docs/TRD.md) · [System Design](docs/SYSTEM_DESIGN.md)
 - **Engine:** Rust (`engine/`). Headless CLI, scientific validation suite, and WebAssembly build.
 - **App:** browser UI (`app/web/`). React and TypeScript; the engine runs in a Web Worker.
@@ -19,7 +20,7 @@ Nothing is scripted. Thick fur in the cold, thin coats in the desert, island pop
 | ![Population density layer for steppe hares, with the World tab's interventions](docs/screenshots/density-layer.png) | ![Chronicle listing adaptations, population crashes and an extinction](docs/screenshots/chronicle.png) |
 | **World.** Map layers (here, hare density) and interventions: climate shifts, meteors, introductions, epidemics. | **Chronicle.** What happened and when: new species, extinctions, crashes and significant trait changes. |
 
-Screenshots are from the end-to-end test (`SHOTS=dir npm run test:e2e` in `app/web/` saves them).
+Screenshots are from the end-to-end test (`SHOTS=dir npm run test:e2e` in `app/web/` saves them). The [user guide](docs/USER_GUIDE.md) walks through every feature; its screenshots are regenerated with `npm run screenshots`.
 
 ## Where to use it, and why
 
