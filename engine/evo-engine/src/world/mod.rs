@@ -246,10 +246,21 @@ impl World {
         self.temp_mean(i) + self.temp_amp[i] * season_cos + (3.0 + 6.0 * dry) * diurnal_cos
     }
 
+    /// Seasonal cosine for a day of year: +1 at the warmest day, −1 at the coldest.
+    #[inline]
+    pub fn season_cos(day_of_year: f64) -> f32 {
+        (std::f64::consts::TAU * (day_of_year - 200.0) / 365.25).cos() as f32
+    }
+
     /// Mean temperature of the given day (no diurnal swing).
     pub fn temp_day(&self, i: usize, day_of_year: f64) -> f32 {
-        let season = (std::f64::consts::TAU * (day_of_year - 200.0) / 365.25).cos() as f32;
-        self.temp_mean(i) + self.temp_amp[i] * season
+        self.temp_season(i, Self::season_cos(day_of_year))
+    }
+
+    /// Mean daily temperature from a precomputed [`World::season_cos`] (hot path).
+    #[inline]
+    pub fn temp_season(&self, i: usize, season_cos: f32) -> f32 {
+        self.temp_mean(i) + self.temp_amp[i] * season_cos
     }
 
     /// Background luminance used for camouflage; snow makes it bright.
@@ -293,8 +304,8 @@ impl World {
     }
 
     /// Logistic regrowth of both forage pools over `days` at a given day of year.
-    fn grow(&mut self, i: usize, day_of_year: f64, days: f32) {
-        let t = self.temp_day(i, day_of_year);
+    fn grow(&mut self, i: usize, season_cos: f32, days: f32) {
+        let t = self.temp_season(i, season_cos);
         let season = (t / 10.0).clamp(0.0, 1.0);
         for (stock, max, prod) in [
             (
@@ -319,18 +330,20 @@ impl World {
 
     /// Daily plant growth and carcass decay.
     pub fn grow_vegetation_day(&mut self, day_of_year: f64, carcass_decay: f32) {
+        let sc = Self::season_cos(day_of_year);
         for i in 0..self.w * self.h {
-            self.grow(i, day_of_year, 1.0);
+            self.grow(i, sc, 1.0);
             self.carcass[i] *= 1.0 - carcass_decay;
         }
     }
 
-    /// One year of vegetation in ten-day steps (Population mode, display only).
+    /// One year of vegetation in monthly steps (Population mode, display only; demes
+    /// draw on annual production, so coarse steps cost accuracy only on the map).
     pub fn grow_vegetation_year(&mut self) {
-        for step in 0..36 {
-            let doy = step as f64 * 10.15 + 5.0;
+        for month in 0..12 {
+            let sc = Self::season_cos(month as f64 * 30.44 + 15.0);
             for i in 0..self.w * self.h {
-                self.grow(i, doy, 10.0);
+                self.grow(i, sc, 30.44);
             }
         }
         for c in self.carcass.iter_mut() {

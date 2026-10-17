@@ -339,6 +339,8 @@ impl Simulation {
         let ps = self.params.patch_size;
         let w = &self.world;
         let area = self.params.habitat_m2_per_tile as f32;
+        let month_cos: [f32; 12] =
+            std::array::from_fn(|m| crate::world::World::season_cos(m as f64 * 30.44 + 15.0));
         let mut out = vec![PatchCtx::default(); pw * ph];
         for (p, pc) in out.iter_mut().enumerate() {
             let (px, py) = (p % pw, p / pw);
@@ -353,7 +355,7 @@ impl Simulation {
                     pc.land.push(i);
                     let mut season = 0.0;
                     for (m, v) in tm.iter_mut().enumerate() {
-                        let t = w.temp_day(i, m as f64 * 30.44 + 15.0);
+                        let t = w.temp_season(i, month_cos[m]);
                         *v += t;
                         season += (t / 10.0).clamp(0.0, 1.0) / 12.0;
                     }
