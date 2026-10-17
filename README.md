@@ -4,9 +4,37 @@ A realistic simulation of biological evolution. Build a world (random, from a te
 
 Nothing is scripted. Thick fur in the cold, thin coats in the desert, island populations becoming new species, predators wiping out scarce prey: all of these emerge from genes, bodies, food, climate and chance.
 
+- **User guide:** [every feature, step by step, with screenshots](docs/USER_GUIDE.md)
 - **Design documents:** [PRD](docs/PRD.md) · [TRD](docs/TRD.md) · [System Design](docs/SYSTEM_DESIGN.md)
 - **Engine:** Rust (`engine/`). Headless CLI, scientific validation suite, and WebAssembly build.
 - **App:** browser UI (`app/web/`). React and TypeScript; the engine runs in a Web Worker.
+
+![A hare selected in Individual mode: the map shows the Earth-like Continent template, and the inspector lists its energy, hydration, physiology and phenotype](docs/screenshots/individual-inspector.png)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Create a world dialog with templates, seed, mutation rate and founder species](docs/screenshots/create-world.png) | ![Species tab after 1,000 years: population curve and adult body mass mean ± SD for steppe hares](docs/screenshots/species-trends.png) |
+| **Create a world.** Pick a template or a random world, then choose founder species, counts, diversity and release year. | **Species.** Population and trait trends over time; extinct species stay listed. |
+| ![Population density layer for steppe hares, with the World tab's interventions](docs/screenshots/density-layer.png) | ![Chronicle listing adaptations, population crashes and an extinction](docs/screenshots/chronicle.png) |
+| **World.** Map layers (here, hare density) and interventions: climate shifts, meteors, introductions, epidemics. | **Chronicle.** What happened and when: new species, extinctions, crashes and significant trait changes. |
+
+Screenshots are from the end-to-end test (`SHOTS=dir npm run test:e2e` in `app/web/` saves them). The [user guide](docs/USER_GUIDE.md) walks through every feature; its screenshots are regenerated with `npm run screenshots`.
+
+## Where to use it, and why
+
+Evolution is hard to see. It happens over thousands of generations, and its outcome depends on many interacting forces. Evolutions lets you watch that process directly, rerun it with a different seed, and change one condition at a time.
+
+| Where | Use it to | Why it helps |
+|---|---|---|
+| **Classrooms and lectures** (school biology, university evolution and ecology courses) | Show natural selection, drift, speciation and predator–prey cycles live; set exercises such as "release hares on the Ice Age map and explain what happens to their fur" | Students see adaptation emerge from cause and effect rather than reading about it. Templates like *Island Dwarfism Lab* and *Blank Slate* are built for set experiments, and the same seed lets a whole class reproduce one run. |
+| **Self-study and curiosity** | Ask "what if?": warmer climate, a meteor, wolves introduced to an island | Every outcome comes from genes, bodies, food, climate and chance. The Inspector shows each animal's state, the Chronicle records what changed, and the CLI's `--debug` shows why a population grows or declines. |
+| **Research and teaching labs** | Run the headless CLI for many seeds, export CSV time series and Newick trees, and analyse them in R or Python | Quick intuition-building for population-genetics and eco-evolutionary questions. The validation suite checks the engine against Hardy–Weinberg, Kimura fixation, the breeder's equation and other textbook results. |
+| **Museums, outreach and science communication** | Run *Earth-like Continent* or *East African Rift* on a screen and fast-forward through deep time | Nothing is scripted, so each run tells a different but plausible story. |
+| **Game and simulation developers** | Study or reuse the engine: utility-AI behaviour, physiology models, Individual ↔ Population switching | A worked example of scaling an agent-based simulation from one animal per hour to whole populations over 100,000 years. |
+
+It is not a forecasting tool. Absolute numbers are scaled down and mutation rates are accelerated by default (see *Modelling notes* below), so use it to understand mechanisms and trends, not to predict real populations.
 
 ## Quick start
 
