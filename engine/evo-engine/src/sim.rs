@@ -120,7 +120,13 @@ impl Simulation {
                 .ok_or_else(|| format!("unknown template '{}'", cfg.template))?
         };
         let gen = cfg.gen.unwrap_or_else(|| tmpl.gen.clone());
-        if gen.width < 8 || gen.height < 8 || gen.width * gen.height > 1 << 20 {
+        if gen.width < 8
+            || gen.height < 8
+            || gen
+                .width
+                .checked_mul(gen.height)
+                .is_none_or(|n| n > 1 << 20)
+        {
             return Err("world size must be between 8×8 and ~1M tiles".into());
         }
         if !(-90.0..=90.0).contains(&gen.lat_south)
@@ -135,9 +141,11 @@ impl Simulation {
             || gen.precip_factor < 0.0
             || !gen.temp_offset.is_finite()
             || !gen.roughness.is_finite()
+            || !(1..=64).contains(&gen.plates)
+            || !(0.0..=20_000.0).contains(&gen.mountain_height_m)
         {
             return Err(
-                "invalid world settings (land fraction, tilt, rainfall or temperature)".into(),
+                "invalid world settings (land fraction, tilt, rainfall, temperature, plates or mountain height)".into(),
             );
         }
         let world = World::generate(gen, cfg.seed);
@@ -506,6 +514,12 @@ impl Simulation {
         if g.count == 0 || g.count > 20_000 {
             return Err("founder count must be 1..20000".into());
         }
+        // Find habitat before creating anything, so a failed release leaves no phantom species.
+        let tiles = self.founder_tiles(g.region, &tmpl.phenotype_means(), g.count);
+        if tiles.is_empty() {
+            return Err(format!("no suitable habitat found for {}", tmpl.name));
+        }
+        let weights: Vec<f64> = tiles.iter().map(|t| t.1).collect();
         let arch_id = self.archs.len() as u16;
         let mut rng = Rng::keyed(self.seed, self.minutes, arch_id as u64, stream::FOUNDERS);
         let spec = tmpl.founder_spec(g.diversity);
@@ -520,11 +534,6 @@ impl Simulation {
             tmpl.color,
             self.seed,
         );
-        let tiles = self.founder_tiles(g.region, &tmpl.phenotype_means(), g.count);
-        let weights: Vec<f64> = tiles.iter().map(|t| t.1).collect();
-        if tiles.is_empty() {
-            return Err(format!("no suitable habitat found for {}", tmpl.name));
-        }
         let mut new = Vec::with_capacity(g.count as usize);
         for k in 0..g.count {
             let genome = self.archs[arch_id as usize].founder_genome(&mut rng);
@@ -719,15 +728,24 @@ impl Simulation {
     /// Simulates only the demes in a rectangle (tile coordinates) as individuals; the rest
     /// of the world is held as demes until returning to Population mode (TRD TR-T4).
     pub fn focus_region(&mut self, x0: u32, y0: u32, x1: u32, y1: u32) -> Result<u64, String> {
+        let (w, h) = (self.world.w as u32, self.world.h as u32);
+        // Clamp to the map (x1 may run up to one world width past the seam).
+        let x0 = x0 % w;
+        let x1 = x1.clamp(x0, x0 + w - 1);
+        let (y0, y1) = (y0.min(h - 1), y1.min(h - 1));
         if self.mode == Mode::Individual {
             self.set_mode(Mode::Population)?;
         }
         let ps = self.params.patch_size as u32;
         let pw = self.patches_w() as u32;
-        let (px0, py0, px1, py1) = (x0 / ps, y0 / ps, x1.max(x0) / ps, y1.max(y0) / ps);
+        // The world wraps east–west, so px1 may be ≥ pw: a region dragged across the seam
+        // stays one region.
+        let (px0, px1) = (x0 / ps, (x1 / ps).min(x0 / ps + pw - 1));
+        let (py0, py1) = (y0 / ps, y1.max(y0) / ps);
         let inside = |p: u32| {
             let (px, py) = (p % pw, p / pw);
-            (px0..=px1).contains(&px) && (py0..=py1).contains(&py)
+            ((px0..=px1).contains(&px) || (px0..=px1).contains(&(px + pw)))
+                && (py0..=py1).contains(&py)
         };
         let n: u64 = self
             .demes
@@ -751,7 +769,11 @@ impl Simulation {
         self.focus = Some((
             px0 * ps,
             py0 * ps,
-            ((px1 + 1) * ps).min(self.world.w as u32),
+            if px1 < pw {
+                ((px1 + 1) * ps).min(self.world.w as u32)
+            } else {
+                (px1 + 1) * ps
+            },
             ((py1 + 1) * ps).min(self.world.h as u32),
         ));
         self.event(
@@ -834,7 +856,10 @@ impl Simulation {
             let parent = self.species.get(s.parent).clone();
             let members: std::collections::BTreeSet<usize> = s.members.iter().copied().collect();
             // Where the daughter lives relative to the parent decides its common name.
-            let (mut my, mut oy, mut mx, mut ox, mut mn, mut on) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            // x is averaged on a circle because the world wraps east–west.
+            let (mut my, mut oy, mut mn, mut on) = (0.0, 0.0, 0.0, 0.0);
+            let (mut mc, mut ms, mut oc, mut os) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+            let tau = std::f64::consts::TAU;
             for p in &pops {
                 if p.species != s.parent {
                     continue;
@@ -843,20 +868,27 @@ impl Simulation {
                     (p.patch as usize % pw) as f64,
                     (p.patch as usize / pw) as f64,
                 );
+                let (sin, cos) = (tau * px / pw as f64).sin_cos();
+                let n = p.n as f64;
                 if members.contains(&p.key) {
-                    my += py * p.n as f64;
-                    mx += px * p.n as f64;
-                    mn += p.n as f64;
+                    my += py * n;
+                    mc += cos * n;
+                    ms += sin * n;
+                    mn += n;
                 } else {
-                    oy += py * p.n as f64;
-                    ox += px * p.n as f64;
-                    on += p.n as f64;
+                    oy += py * n;
+                    oc += cos * n;
+                    os += sin * n;
+                    on += n;
                 }
             }
-            let (dy, dx) = (
-                my / mn.max(1.0) - oy / on.max(1.0),
-                mx / mn.max(1.0) - ox / on.max(1.0),
-            );
+            let mut dang = ms.atan2(mc) - os.atan2(oc);
+            if dang > std::f64::consts::PI {
+                dang -= tau;
+            } else if dang < -std::f64::consts::PI {
+                dang += tau;
+            }
+            let (dy, dx) = (my / mn.max(1.0) - oy / on.max(1.0), dang / tau * pw as f64);
             let prefix = if dy.abs() >= dx.abs() {
                 if dy < 0.0 {
                     "Northern"
@@ -1108,7 +1140,10 @@ impl Simulation {
                 );
             }
             Intervention::Meteor { fx, fy, radius } => {
-                let (cx, cy) = (fx * self.world.w as f32, fy * self.world.h as f32);
+                let (cx, cy) = (
+                    fx.rem_euclid(1.0) * self.world.w as f32,
+                    fy.clamp(0.0, 1.0) * self.world.h as f32,
+                );
                 let r = radius.clamp(0.01, 0.5) * self.world.w as f32;
                 let w = self.world.w as f32;
                 let dist = |x: f32, y: f32| {
@@ -1293,7 +1328,41 @@ impl Simulation {
         if sim.model_version > MODEL_VERSION {
             return Err("save was made by a newer engine".into());
         }
+        sim.validate().map_err(|e| format!("corrupt save: {e}"))?;
         Ok(sim)
+    }
+
+    /// Checks the invariants that stepping relies on, so a damaged save is rejected
+    /// on load instead of panicking (or trapping the WASM engine) later.
+    fn validate(&self) -> Result<(), String> {
+        let p = &self.params;
+        if p.tick_minutes == 0 || p.day_minutes < p.tick_minutes || p.patch_size == 0 {
+            return Err("invalid time or patch parameters".into());
+        }
+        if !(p.year_days.is_finite() && p.year_days > 0.0) {
+            return Err("invalid year length".into());
+        }
+        let tiles = self.world.w * self.world.h;
+        if self.world.w == 0 || self.world.elevation.len() != tiles {
+            return Err("world size does not match its terrain".into());
+        }
+        let n_patches = (self.patches_w() * self.patches_h()) as u32;
+        let n_species = self.species.list.len() as u32;
+        for d in self.demes.iter().chain(&self.frozen) {
+            let arch = self
+                .archs
+                .get(d.arch as usize)
+                .ok_or("deme with unknown genome")?;
+            if d.patch >= n_patches || d.species >= n_species || d.freqs.len() != arch.loci.len() {
+                return Err("deme out of range".into());
+            }
+        }
+        for a in &self.animals {
+            if a.arch as usize >= self.archs.len() || a.species >= n_species {
+                return Err("animal out of range".into());
+            }
+        }
+        Ok(())
     }
 
     /// Deterministic hash of the simulation state (TRD TR-D7).

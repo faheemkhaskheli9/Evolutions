@@ -21,12 +21,14 @@ const KINDS: { key: Kind; label: string }[] = [
 export function RunUntil({ catalog, species, disabled, onRun }: Props) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<Kind>("speciation");
-  const [sp, setSp] = useState<number | "all">("all");
+  const [spChoice, setSp] = useState<number | "all">("all");
   const [trait, setTrait] = useState(0);
   const [op, setOp] = useState<"below" | "above">("below");
   const [value, setValue] = useState(1000);
   const [years, setYears] = useState(10000);
   const alive = species.filter((s) => s.extinct_year === null);
+  // A remembered species may have gone extinct (or belong to an earlier world).
+  const sp = spChoice !== "all" && alive.some((s) => s.id === spChoice) ? spChoice : "all";
   const speciesId = sp === "all" ? (alive[0]?.id ?? null) : sp;
   const needsSpecies = kind === "trait" && speciesId === null;
 

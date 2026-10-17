@@ -35,6 +35,7 @@ export function Inspector({ data, onClose }: { data: Record<string, any> | null;
       <p className="muted small">
         <em>{data.species_name}</em> · {data.sex} · {fmt(data.age_years, 2)} years old · generation {data.generation}
       </p>
+      {data.gone && <p className="gone">This animal has died or left the simulated area. Its last known state is shown.</p>}
       <p className="now-doing">{data.action}{data.pregnant ? ` · pregnant with ${data.pregnant}` : ""}</p>
       {bar("Energy reserves", data.energy_pct, "energy")}
       {bar("Hydration", data.hydration_pct, "water")}

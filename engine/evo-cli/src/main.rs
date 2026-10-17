@@ -27,6 +27,7 @@ fn usage() -> ! {
       --csv <dir>              write per-species metrics CSV files
       --newick <file>          write the phylogeny
       --quiet                  no progress output
+      --debug                  print each species' yearly vital rates (Population mode)
   evo info <file.evo>        summarise a save file"
     );
     std::process::exit(2)
@@ -46,6 +47,33 @@ fn parse(args: &[String]) -> HashMap<String, String> {
         }
     }
     m
+}
+
+const RUN_OPTIONS: &[&str] = &[
+    "template",
+    "seed",
+    "years",
+    "mode",
+    "individual-years",
+    "strict",
+    "load",
+    "out",
+    "csv",
+    "newick",
+    "quiet",
+    "debug",
+];
+
+/// Parses `--key value`, exiting with a message (rather than silently using the default)
+/// when the value is present but malformed.
+fn num<T: std::str::FromStr>(o: &HashMap<String, String>, key: &str, default: T) -> T {
+    match o.get(key) {
+        None => default,
+        Some(v) => v.parse().unwrap_or_else(|_| {
+            eprintln!("invalid value for --{key}: '{v}'");
+            std::process::exit(2)
+        }),
+    }
 }
 
 fn summary(sim: &Simulation) {
@@ -110,11 +138,32 @@ fn main() {
         }
         "run" => {
             let o = parse(&args[1..]);
-            let seed: u64 = o.get("seed").and_then(|s| s.parse().ok()).unwrap_or(1);
-            let years: f64 = o.get("years").and_then(|s| s.parse().ok()).unwrap_or(100.0);
+            let mut keys: Vec<_> = o
+                .keys()
+                .filter(|k| !RUN_OPTIONS.contains(&k.as_str()))
+                .collect();
+            keys.sort();
+            if let Some(k) = keys.first() {
+                eprintln!("unknown option '{k}'");
+                usage();
+            }
+            let seed: u64 = num(&o, "seed", 1);
+            let years: f64 = num(&o, "years", 100.0);
+            if !(years.is_finite() && years >= 0.0) {
+                eprintln!("--years must be a non-negative number");
+                std::process::exit(2)
+            }
+            let mode = o.get("mode").map(|s| s.as_str()).unwrap_or("auto");
+            if !["auto", "individual", "population"].contains(&mode) {
+                eprintln!("--mode must be auto, individual or population (got '{mode}')");
+                std::process::exit(2)
+            }
             let quiet = o.contains_key("quiet");
             let mut sim = if let Some(path) = o.get("load") {
-                let bytes = std::fs::read(path).expect("read save");
+                let bytes = std::fs::read(path).unwrap_or_else(|e| {
+                    eprintln!("cannot read {path}: {e}");
+                    std::process::exit(1)
+                });
                 Simulation::load_bytes(&bytes).unwrap_or_else(|e| {
                     eprintln!("{e}");
                     std::process::exit(1)
@@ -136,19 +185,24 @@ fn main() {
                     std::process::exit(1)
                 })
             };
-            let mode = o.get("mode").map(|s| s.as_str()).unwrap_or("auto");
-            let watch: f64 = o
-                .get("individual-years")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1.0);
+            let watch: f64 = num(&o, "individual-years", 1.0);
             let start = Instant::now();
-            let end_year = sim.year() + years;
+            let start_year = sim.year();
+            let end_year = start_year + years;
             let mut last_report = sim.year();
             if mode == "population" {
                 let _ = sim.set_mode(Mode::Population);
+            } else if mode == "individual" {
+                if let Err(e) = sim.set_mode(Mode::Individual) {
+                    eprintln!("{e}");
+                    std::process::exit(1)
+                }
             }
             while sim.year() < end_year {
-                if mode == "auto" && sim.mode == Mode::Individual && sim.year() >= watch {
+                if mode == "auto"
+                    && sim.mode == Mode::Individual
+                    && sim.year() - start_year >= watch
+                {
                     let _ = sim.set_mode(Mode::Population);
                 }
                 sim.step();

@@ -1,3 +1,4 @@
+import { NumberInput } from "./NumberInput";
 import { useEffect, useState } from "react";
 import type { AutosaveInfo, Catalog, FounderGroup, LandShape, NewWorldConfig, WorldGenParams } from "../engine/protocol";
 import { rgb } from "../util";
@@ -188,13 +189,13 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
                   </select>
                 </td>
                 <td>
-                  <input type="number" min={2} max={20000} value={f.count} onChange={(e) => update(i, { count: Math.max(2, Number(e.target.value)) })} aria-label="Count" />
+                  <NumberInput min={2} max={20000} value={f.count} onChange={(count) => update(i, { count })} aria-label="Count" />
                 </td>
                 <td>
                   <input type="range" min={0} max={1} step={0.1} value={f.diversity} onChange={(e) => update(i, { diversity: Number(e.target.value) })} aria-label="Genetic diversity" />
                 </td>
                 <td>
-                  <input type="number" min={0} max={1000} value={f.delay_years ?? 0} onChange={(e) => update(i, { delay_years: Math.max(0, Number(e.target.value)) })} aria-label="Release year" />
+                  <NumberInput min={0} max={1000} value={f.delay_years ?? 0} onChange={(delay_years) => update(i, { delay_years })} aria-label="Release year" />
                 </td>
                 <td>
                   <button className="ghost" onClick={() => setFounders((fs) => fs.filter((_, k) => k !== i))} aria-label="Remove">
@@ -214,7 +215,15 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
         <div className="row between wrap gap footer">
           <label className="ghost file">
             Open a saved world…
-            <input type="file" accept=".evo" onChange={(e) => e.target.files?.[0] && onLoad(e.target.files[0])} />
+            <input
+              type="file"
+              accept=".evo"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) onLoad(file);
+              }}
+            />
           </label>
           <button
             className="primary"

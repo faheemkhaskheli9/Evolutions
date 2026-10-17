@@ -173,7 +173,7 @@ export type FromWorker =
   | FrameMsg
   | { type: "progress"; done: number; total: number; label: string }
   | { type: "jumpDone" }
-  | { type: "inspect"; data: Record<string, unknown> | null }
+  | { type: "inspect"; id: number; data: Record<string, unknown> | null }
   | { type: "picked"; id: number }
   | { type: "speciesDetail"; id: number; traits: TraitRow[]; metrics: Sample[] }
   | { type: "layer"; kind: string; data: Float32Array }

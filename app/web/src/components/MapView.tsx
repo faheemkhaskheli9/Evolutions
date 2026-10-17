@@ -170,10 +170,7 @@ export function MapView(props: Props) {
     const span = world.w * v.scale;
     // The world wraps east–west: draw neighbouring copies where visible.
     const copies: number[] = [];
-    for (let k = -2; k <= 2; k++) {
-      const x0 = v.ox + k * span;
-      if (x0 + span > 0 && x0 < cw) copies.push(k);
-    }
+    for (let k = Math.floor(-v.ox / span); v.ox + k * span < cw; k++) copies.push(k);
     const f = frame.current;
     for (const k of copies) {
       const x0 = v.ox + k * span;
@@ -306,9 +303,17 @@ export function MapView(props: Props) {
     if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
     if (d.region) {
       const rect = canvasRef.current!.getBoundingClientRect();
-      const [ax, ay] = toTile(d.x - rect.left, d.y - rect.top);
-      const [bx, by] = toTile(e.clientX - rect.left, e.clientY - rect.top);
-      regionRef.current = [Math.min(ax, bx), Math.max(0, Math.min(ay, by)), Math.max(ax, bx), Math.min(world.h, Math.max(ay, by))];
+      // Unwrapped tile coordinates, so a box dragged across the east–west seam stays one box:
+      // x0 is moved into [0, w) and x1 may run past the seam (up to one world width).
+      const v = view.current;
+      const ax = (d.x - rect.left - v.ox) / v.scale;
+      const bx = (e.clientX - rect.left - v.ox) / v.scale;
+      const ay = (d.y - rect.top - v.oy) / v.scale;
+      const by = (e.clientY - rect.top - v.oy) / v.scale;
+      const shift = Math.floor(Math.min(ax, bx) / world.w) * world.w;
+      const x0 = Math.min(ax, bx) - shift;
+      const x1 = Math.min(Math.max(ax, bx) - shift, x0 + world.w - 1);
+      regionRef.current = [x0, Math.max(0, Math.min(ay, by)), x1, Math.min(world.h, Math.max(ay, by))];
     } else {
       view.current.ox = d.ox + dx;
       view.current.oy = d.oy + dy;

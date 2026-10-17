@@ -2,7 +2,7 @@
 
 This guide walks through every feature of the Evolutions app in the order you will meet them. It covers creating a world, watching individual animals, fast-forwarding through deep time, reading what evolved, and changing the world.
 
-All screenshots come from a single run of the Earth-like Continent template, seed 2024, over about 2,000 simulated years. Your own runs will differ: chance is part of evolution.
+All screenshots come from a single run of the Earth-like Continent template, seed 2024, over about 2,000 simulated years. Your own runs will differ: chance is part of evolution. To regenerate them after changing the app, run `npm run build && npm run screenshots` in `app/web/`.
 
 **Contents**
 
@@ -59,8 +59,10 @@ The setting you pick is shown again in the **World** tab.
 
 The founder table decides which species start the world:
 
+![Founder table: steppe hares, plains deer and pack wolves, with count, diversity and release year](guide/03-founders.png)
+
 - **Species:** steppe hare, plains deer, pack wolf, ambush cat, field mouse, early hominin, forest ape.
-- **Count:** how many founders to release.
+- **Count:** how many founders to release (2 to 20,000). Type freely: the value is checked when you leave the box or press **Enter**.
 - **Diversity:** genetic variation among the founders. Low values model a bottleneck, such as a handful of castaways reaching an island.
 - **Release in year:** when they appear. Predators do best released a few decades after their prey.
 - **✕** removes a row, and **+ Add species** adds one.
@@ -123,7 +125,7 @@ The Inspector shows:
 - **Here:** the biome, the temperature now and on average, rainfall, and how much forage is left on its tile.
 - **Phenotype:** all 21 heritable traits, as developed from its genes plus its environment.
 
-Close it with **✕**.
+If the animal dies (or, while you watch a region, walks out of it), the Inspector keeps its last known state and says so, and the map stops marking it. Close it with **✕**.
 
 ---
 
@@ -134,12 +136,12 @@ Close it with **✕**.
 | Control | What it does |
 |---|---|
 | **▶ / ❚❚** | Play or pause (**Space**). |
-| **Speed presets** | **1 hour/s**, **1 day/s**, **1 week/s** and **1 month/s** suit watching animals. **1 year/s**, **10 years/s** and **100 years/s** suit watching evolution. |
-| **≈ speed** | The speed actually achieved. Very large worlds may run slower than the preset. |
+| **Speed presets** | **1 hour/s**, **1 day/s** and **1 week/s** suit watching animals. From **1 month/s** up, Auto mode switches to Population mode, so these suit watching populations and evolution. |
+| **≈ speed** | The speed actually achieved, averaged over about a second. Very large worlds may run slower than the preset. |
 | **Jump ahead +100 / +1k / +10k / +100k yr** | Fast-forwards that many years as fast as possible. |
 | **Run until…** | Fast-forwards until something happens (see [section 10](#10-run-until-something-happens)). |
 
-During a jump, a progress card shows the year reached. **Stop here** ends the jump at the current year.
+During a jump, a progress card shows the year reached. **Stop here** ends the jump at the current year. Play, pause and the jump buttons are disabled until the jump ends. If every organism dies during a jump, it stops and says so.
 
 ![Fast-forwarding: progress card with a Stop here button](guide/08-jump-progress.png)
 
@@ -161,7 +163,9 @@ In Population mode the map shows species ranges as colour over the terrain. Each
 **Choosing the mode.** In the **World** tab, **Simulation detail** has three settings:
 
 - **Auto** (default) uses Individual mode up to about 1 week/s and switches to Population mode at higher speeds and for jumps. It also switches if the population grows too large to follow one by one (more than 25,000 animals).
-- **Individual** or **Population** locks the mode.
+- **Individual** or **Population** keeps that mode while time plays. Two things still override **Individual**:
+  - jumps of more than 2 years always run in Population mode; afterwards the app returns to Individual mode if the world is small enough;
+  - a world of more than 25,000 animals can't be simulated one by one. The app switches to Population mode and suggests watching a region instead (see [section 11](#11-watch-a-region-in-a-crowded-world)).
 
 ---
 
@@ -254,11 +258,15 @@ Once a world holds more than about 25,000 animals, they can't all be simulated o
 1. In the **World** tab, click **⬚ Watch region**, or hold **Shift** on the map.
 2. Drag a box over the area you want to watch.
 
-The animals in that box become individuals; the rest of the world waits as groups until you return to Population mode. A dashed outline marks the region, and the badge reads **Individual · region**.
+The animals in that box become individuals; the rest of the world waits as groups until you return to Population mode. A dashed outline marks the region, the badge reads **Individual · region**, and **Simulation detail** shows **Individual** while you watch.
+
+The box can cross the map's left or right edge: the world wraps east–west, so a box dragged across the edge covers both sides of it.
 
 ![Watching a region: individuals inside the dashed box, the rest of the world held as species ranges](guide/19-watch-region.png)
 
 If the box holds too many animals, the app asks you to choose a smaller area.
+
+The region ends when you pick **Population** or **Auto**, or when you jump ahead. After a jump, **Simulation detail** returns to the setting you had before you started watching.
 
 ---
 
@@ -272,7 +280,7 @@ Interventions change **conditions only, never genes**. Evolution does the rest. 
 |---|---|---|
 | **Climate** | Click **−5 °C**, **−2 °C**, **+2 °C** or **+5 °C**. | Shifts global temperature. Biomes, plant growth and heat or cold stress change; watch insulation, body size and ranges respond. The current offset is shown below the buttons. |
 | **Meteor impact** | Click **Arm meteor**, then click the map. | Kills nearly everything within the blast radius, strips vegetation, and causes an impact winter (−4 °C for about 8 years). |
-| **Introduce species** | Pick a species and a count, then **Place** (and click the map) or **Best habitat**. | Releases new founders. Good for invasive-species or predator-reintroduction experiments. |
+| **Introduce species** | Pick a species and a count, then **Place** (and click the map) or **Best habitat**. | Releases new founders. Good for invasive-species or predator-reintroduction experiments. If there is no suitable habitat where you click (open ocean, for example), the app says so and nothing is added. |
 | **Epidemic** | Pick a species and a mortality %, then **Strike**. | Kills that share of the species, creating a bottleneck. Watch genetic diversity drop. |
 
 ![After a meteor strike: a dark gap in the population density map where the impact killed everything](guide/21-meteor.png)
@@ -286,8 +294,8 @@ At the bottom of the **World** tab, **Deaths so far** breaks down causes of deat
 ## 13. Save, open and resume
 
 - **Save** (top bar) downloads the whole world as an `.evo` file: terrain, every genome, populations, species, history and chronicle.
-- **Open** (top bar, or **Open a saved world…** in the Create dialog) loads an `.evo` file and continues exactly where it left off. The same seed and save always continue identically.
-- **Autosave:** the app also keeps your latest world in the browser. It saves when the world is created, every minute while it runs, and after each jump. When you come back, the Create dialog offers **Continue where you left off?** with the template, seed, year and save time; click **Resume**.
+- **Open** (top bar, or **Open a saved world…** in the Create dialog) loads an `.evo` file and continues exactly where it left off. The same seed and save always continue identically. A damaged file is rejected with a message, and the current world stays open.
+- **Autosave:** the app also keeps your latest world in the browser. It saves when the world is created or opened, after each jump, and once a minute while anything changes (time running, or an intervention while paused). When you come back, the Create dialog offers **Continue where you left off?** with the template, seed, year and save time; click **Resume**.
 
 ![Resume prompt in the Create dialog after reopening the app](guide/23-resume.png)
 
@@ -299,12 +307,12 @@ Autosave is per browser and is lost if you clear site data, so use **Save** for 
 
 | Input | Action |
 |---|---|
-| **Space** | Play / pause. |
-| **Esc** | Cancel the armed tool (meteor, place species, watch region). |
+| **Space** | Play / pause. Ignored while you type in a box, during a jump, or when the key is held down. |
+| **Esc** | Cancel the armed tool (meteor, place species, watch region), even while a box has focus. |
 | **Scroll** on the map | Zoom in or out at the cursor. |
 | **Drag** on the map | Pan. The world wraps east–west. |
 | **Click** an animal | Open it in the Inspector (Individual mode). |
-| **Shift + drag** on the map | Watch that region individually. |
+| **Shift + drag** on the map | Watch that region individually. The box may cross the east–west edge. |
 | **Hover** a chart | Read exact values. |
 
 ---

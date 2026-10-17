@@ -640,3 +640,96 @@ fn custom_world_settings_apply_and_are_validated() {
         assert!(world(bad).is_err());
     }
 }
+
+/// A focus region dragged across the east–west seam covers the patches on both sides of
+/// it, not the inverted rectangle between them.
+#[test]
+fn focus_region_wraps_across_the_seam() {
+    let mut s = blank(33);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(2.0);
+    let ps = s.params.patch_size as u32;
+    let (w, h) = (s.world.w as u32, s.world.h as u32);
+    let pw = w / ps;
+    let expected: u64 = s
+        .demes
+        .iter()
+        .filter(|d| {
+            let px = d.patch % pw;
+            px == pw - 1 || px == 0
+        })
+        .map(|d| d.total() as u64)
+        .sum();
+    assert!(expected > 0, "no animals next to the seam");
+    let before = s.population();
+    let n = s.focus_region(w - ps, 0, w + ps - 1, h - 1).unwrap();
+    assert_eq!(n, expected);
+    assert_eq!(s.population(), before);
+    let f = s.focus.unwrap();
+    assert_eq!((f.0, f.2), (w - ps, w + ps));
+}
+
+/// A founder release that finds no habitat leaves no phantom species behind.
+#[test]
+fn failed_founder_release_creates_no_species() {
+    let mut s = blank(34);
+    let species = s.species.list.len();
+    let archs = s.archs.len();
+    let r = s.add_founders(&FounderGroup {
+        species: "hare".into(),
+        count: 50,
+        diversity: 0.8,
+        region: Some((0.5, 0.5, 0.0)),
+        delay_years: 0.0,
+    });
+    assert!(r.is_err());
+    assert_eq!(s.species.list.len(), species);
+    assert_eq!(s.archs.len(), archs);
+}
+
+/// Oversized or malformed world settings are rejected instead of panicking.
+#[test]
+fn bad_world_settings_are_rejected() {
+    let make = |f: &dyn Fn(&mut WorldGenParams)| {
+        let mut gen = WorldGenParams::default();
+        f(&mut gen);
+        Simulation::new(NewWorld {
+            template: "blank".into(),
+            seed: 1,
+            gen: Some(gen),
+            founders: Some(vec![]),
+            realism: None,
+        })
+    };
+    assert!(make(&|g| {
+        g.width = 1 << 32;
+        g.height = 1 << 32;
+    })
+    .is_err());
+    assert!(make(&|g| g.plates = usize::MAX).is_err());
+    assert!(make(&|g| g.mountain_height_m = f64::INFINITY).is_err());
+}
+
+/// A damaged save is rejected on load rather than panicking on the first step.
+#[test]
+fn damaged_save_is_rejected() {
+    let mut s = blank(35);
+    s.params.tick_minutes = 0;
+    assert!(Simulation::load_bytes(&s.save_bytes().unwrap()).is_err());
+    let mut s = blank(35);
+    s.set_mode(Mode::Population).unwrap();
+    s.demes[0].patch = u32::MAX;
+    assert!(Simulation::load_bytes(&s.save_bytes().unwrap()).is_err());
+}
+
+/// Focus coordinates outside the map are clamped to it.
+#[test]
+fn focus_region_clamps_to_the_map() {
+    let mut s = blank(36);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(1.0);
+    s.focus_region(0, 0, u32::MAX, u32::MAX).unwrap();
+    let f = s.focus.unwrap();
+    assert!(f.0 < f.2 && f.1 < f.3);
+    assert!(f.2 <= s.world.w as u32 && f.3 <= s.world.h as u32);
+}

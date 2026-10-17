@@ -106,13 +106,29 @@ try {
   });
   await step("watch region", async () => {
     await page.getByRole("button", { name: "Terrain & biomes" }).click();
-    await page.getByRole("button", { name: /Watch region/ }).click();
     const box = await page.locator("canvas.map").boundingBox();
-    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.42, box.y + box.height * 0.45, { steps: 8 });
-    await page.mouse.up();
-    await page.waitForTimeout(1500);
+    // A box holding more animals than the Individual-mode cap is refused; try smaller ones.
+    for (const size of [0.12, 0.06, 0.03, 0.015]) {
+      await page.getByRole("button", { name: /Watch region/ }).click();
+      await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * (0.3 + size), box.y + box.height * (0.3 + size * 1.25), { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(1500);
+      if (/region/.test((await page.locator(".badge").textContent()) ?? "")) break;
+    }
+    const badge = await page.locator(".badge").textContent();
+    if (!/region/.test(badge ?? "")) throw new Error(`badge after watch region: ${badge}`);
+  });
+  await step("a jump ends the region and restores the mode choice", async () => {
+    await page.getByRole("button", { name: "+100 yr" }).click();
+    // The overlay may not have appeared yet, so wait for the result rather than for it to close.
+    await page
+      .locator('[aria-label="Fidelity mode"] [aria-checked="true"]', { hasText: "Auto" })
+      .waitFor({ timeout: 60000 })
+      .catch(() => {
+        throw new Error("mode choice stayed locked to Individual after the jump");
+      });
   });
   await step("climate intervention is logged", async () => {
     await page.getByRole("button", { name: "-2 °C" }).click();

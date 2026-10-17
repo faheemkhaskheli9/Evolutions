@@ -12,6 +12,8 @@ let engine: Engine | null = null;
 let playing = false;
 let speed = 86400; // sim-seconds per real second (1 day / s)
 let modeChoice: ModeChoice = "Auto";
+/** The mode choice to return to when a focus region ends (focusing locks Individual mode). */
+let modeBeforeFocus: ModeChoice | null = null;
 let carryMinutes = 0;
 let lastTick = performance.now();
 let eventsSent = 0;
@@ -26,8 +28,10 @@ let cancelJump = false;
 let densityOn = false;
 let densitySpecies: number | null = null;
 let lastAutosave = 0;
-let autosavedYear = -1;
+/** The world changed since the last autosave (time ran, an intervention, a new world). */
+let dirty = false;
 let autosaving = false;
+let autosavePending = false;
 
 /** Above this speed the engine uses Population mode in Auto (sim-seconds per second). */
 const POPULATION_SPEED = 30 * 86400;
@@ -58,19 +62,26 @@ function replaceEngine(next: Engine) {
 /** Keeps the latest world in IndexedDB so a closed tab can resume (PRD FR-P1). */
 function autosave() {
   lastAutosave = performance.now();
-  if (!engine || autosaving || engine.year() === autosavedYear) return;
+  if (!engine || !dirty) return;
+  if (autosaving) {
+    // Save again once the write in progress finishes, so a new world is not skipped.
+    autosavePending = true;
+    return;
+  }
   const info = JSON.parse(engine.world_info());
   const year = engine.year();
   const bytes = engine.save();
+  dirty = false;
   autosaving = true;
   writeAutosave({ template: info.template, seed: info.seed, year, savedAt: Date.now() }, bytes.buffer as ArrayBuffer)
-    .then(() => {
-      autosavedYear = year;
-    })
     // Storage can be unavailable (private windows, quota); autosave is best-effort.
     .catch(() => {})
     .finally(() => {
       autosaving = false;
+      if (autosavePending) {
+        autosavePending = false;
+        autosave();
+      }
     });
 }
 
@@ -87,7 +98,12 @@ function sendCreated() {
   );
   eventsSent = 0;
   lastSpeciesPost = 0;
-  autosavedYear = -1;
+  achieved = 0;
+  if (modeBeforeFocus !== null) {
+    modeChoice = modeBeforeFocus;
+    modeBeforeFocus = null;
+  }
+  dirty = true;
   sendFrame(true);
   autosave();
 }
@@ -129,6 +145,25 @@ function sendFrame(full = false) {
   post(msg, transfer);
 }
 
+/**
+ * After something forced Population mode (a jump, or the engine's cap), returns to the
+ * mode the user chose, or flags that the world is too large for it.
+ */
+function restoreMode() {
+  if (!engine) return;
+  if (modeBeforeFocus !== null && !JSON.parse(engine.status()).focus) {
+    modeChoice = modeBeforeFocus;
+    modeBeforeFocus = null;
+  }
+  if (modeChoice !== "Individual" || engine.mode() !== "Population") return;
+  if (engine.population() <= engine.individual_cap()) {
+    engine.set_mode("Individual");
+    capExceeded = false;
+  } else {
+    capExceeded = true;
+  }
+}
+
 /** Picks the fidelity mode for the requested speed (TRD TR-T3). */
 function autoMode() {
   if (!engine || modeChoice !== "Auto") return;
@@ -165,9 +200,11 @@ function loop() {
         carryMinutes -= stepMin;
         ran += stepMin;
       }
-      achieved = dt > 0 ? (ran * 60) / dt : 0;
+      if (ran > 0) dirty = true;
+      let dropped = 0;
       if (carryMinutes > stepMin * 2) {
         // Falling behind: drop the backlog; in Auto mode, give up on Individual mode.
+        dropped = carryMinutes - stepMin;
         carryMinutes = stepMin;
         if (modeChoice === "Auto" && engine.mode() === "Individual" && !JSON.parse(engine.status()).focus) {
           if (slowSince === 0) slowSince = now;
@@ -180,6 +217,14 @@ function loop() {
       } else {
         slowSince = 0;
       }
+      // Achieved speed: the requested speed less any backlog dropped, smoothed over about a
+      // second. (Steps of a whole year land on only some frames, so a per-frame count of
+      // simulated time would flicker between zero and a spike.)
+      if (dt > 0) {
+        const now = Math.max(0, speed - (dropped * 60) / dt);
+        achieved += (now - achieved) * Math.min(1, dt / 1);
+      }
+      restoreMode();
       if (engine.population() === 0) {
         playing = false;
         post({ type: "notice", message: "All life has died out." });
@@ -236,6 +281,7 @@ async function jump(years: number, until?: StopCondition) {
     const seen = { events: JSON.parse(engine.status()).events as number };
     // A condition that already holds would stop at once; only react to it becoming true.
     const armed = !until || until.kind === "speciation" || until.kind === "extinction" || conditionMet(engine, until, { events: 0 }) === null;
+    dirty = true;
     while (engine.year() < target && !cancelJump && !reason) {
       const t0 = performance.now();
       while (engine.year() < target && performance.now() - t0 < 40) {
@@ -247,7 +293,8 @@ async function jump(years: number, until?: StopCondition) {
       await new Promise((r) => setTimeout(r, 0));
       if (engine.population() === 0) break;
     }
-    if (until && !armed) post({ type: "notice", message: "That condition already holds, so the run went the full length." });
+    if (engine.population() === 0) post({ type: "notice", message: "All life has died out." });
+    else if (until && !armed) post({ type: "notice", message: "That condition already holds, so the run went the full length." });
     else if (until && !reason && !cancelJump) post({ type: "notice", message: `Ran ${years.toLocaleString()} years without the condition being met.` });
   } catch (e) {
     fail(e);
@@ -258,6 +305,7 @@ async function jump(years: number, until?: StopCondition) {
   if (reason && engine) post({ type: "notice", message: `Stopped in year ${Math.floor(engine.year()).toLocaleString()}: ${reason}` });
   try {
     if (engine) {
+      restoreMode();
       sendFrame(true);
       autosave();
     }
@@ -301,6 +349,7 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "mode":
         modeChoice = m.mode;
+        modeBeforeFocus = null;
         if (engine && m.mode !== "Auto") {
           try {
             engine.set_mode(m.mode);
@@ -315,6 +364,7 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
       case "focus":
         if (engine) {
           const n = engine.focus(...m.rect);
+          if (modeBeforeFocus === null) modeBeforeFocus = modeChoice;
           modeChoice = "Individual";
           capExceeded = false;
           post({ type: "notice", message: `Watching ${n.toLocaleString()} animals individually in the selected region.` });
@@ -329,13 +379,14 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "apply":
         engine?.apply(JSON.stringify(m.intervention));
+        dirty = true;
         sendFrame(true);
         break;
       case "pick":
         if (engine) post({ type: "picked", id: engine.pick(m.x, m.y, m.radius) });
         break;
       case "inspect":
-        if (engine) post({ type: "inspect", data: JSON.parse(engine.inspect(m.id)) });
+        if (engine) post({ type: "inspect", id: m.id, data: JSON.parse(engine.inspect(m.id)) });
         break;
       case "speciesDetail":
         if (engine) {

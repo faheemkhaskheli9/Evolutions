@@ -1,3 +1,4 @@
+import { NumberInput } from "./NumberInput";
 import { useState } from "react";
 import type { Catalog, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
 import type { Layer, Tool } from "./MapView";
@@ -112,7 +113,7 @@ export function WorldPanel(p: Props) {
               </option>
             ))}
           </select>
-          <input type="number" min={2} max={5000} value={p.founderCount} onChange={(e) => p.setFounderCount(Math.max(2, Number(e.target.value)))} aria-label="Founder count" />
+          <NumberInput min={2} max={5000} value={p.founderCount} onChange={p.setFounderCount} aria-label="Founder count" />
           <button className={p.tool === "founders" ? "active" : ""} onClick={() => p.setTool(p.tool === "founders" ? "inspect" : "founders")}>
             {p.tool === "founders" ? "Click the map…" : "Place"}
           </button>
@@ -130,7 +131,7 @@ export function WorldPanel(p: Props) {
               </option>
             ))}
           </select>
-          <input type="number" min={1} max={100} value={plagueRate} onChange={(e) => setPlagueRate(Number(e.target.value))} aria-label="Mortality percent" />
+          <NumberInput min={1} max={100} value={plagueRate} onChange={setPlagueRate} aria-label="Mortality percent" />
           <span className="muted">%</span>
           <button disabled={plagueSpecies === ""} onClick={() => plagueSpecies !== "" && p.apply({ kind: "Plague", species: plagueSpecies, mortality: plagueRate / 100 })}>
             Strike

@@ -51,6 +51,8 @@ export default function App() {
   const frame = useRef<FrameData>({ mode: "Individual", focus: null });
   const [frameVersion, setFrameVersion] = useState(0);
   const noticeId = useRef(0);
+  const inspectRef = useRef<number | null>(null);
+  inspectRef.current = inspectId;
 
   const notify = useCallback((text: string, error = false) => {
     const id = ++noticeId.current;
@@ -110,10 +112,18 @@ export default function App() {
           setProgress(null);
           break;
         case "inspect":
-          setInspectData(m.data);
+          // Ignore replies for an animal no longer inspected (or from a replaced world).
+          if (m.id !== inspectRef.current) break;
+          if (m.data) setInspectData(m.data);
+          else {
+            // It died, or left the simulated area: keep its last state and stop polling.
+            setInspectId(null);
+            setInspectData((d) => (d ? { ...d, gone: true } : null));
+          }
           break;
         case "picked":
           if (m.id >= 0) {
+            inspectRef.current = m.id;
             setInspectId(m.id);
             setTab("inspect");
             client.send({ type: "inspect", id: m.id });
@@ -178,16 +188,17 @@ export default function App() {
   const togglePlay = useCallback(() => client.send({ type: playing ? "pause" : "play" }), [client, playing]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || showNew) return;
+      if (showNew) return;
+      if (e.key === "Escape") setTool("inspect");
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === "Space") {
         e.preventDefault();
-        togglePlay();
+        if (!e.repeat && world && !progress) togglePlay();
       }
-      if (e.key === "Escape") setTool("inspect");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, showNew]);
+  }, [togglePlay, showNew, world, progress]);
 
   const speciesColors = useMemo(() => new Map<number, RGB>(species.map((s) => [s.id, s.color])), [species]);
   const create = (cfg: NewWorldConfig) => {
@@ -208,7 +219,7 @@ export default function App() {
     client.send({ type: "speed", simSecondsPerSecond: v });
   };
   const apply = (iv: Record<string, unknown>) => client.send({ type: "apply", intervention: iv });
-  const selected = inspectData && typeof inspectData.x === "number" ? { x: inspectData.x as number, y: inspectData.y as number } : null;
+  const selected = inspectData && !inspectData.gone && typeof inspectData.x === "number" ? { x: inspectData.x as number, y: inspectData.y as number } : null;
 
   if (!catalog) {
     return (
@@ -252,7 +263,16 @@ export default function App() {
           </button>
           <label className="button file">
             Open
-            <input type="file" accept=".evo" onChange={(e) => e.target.files?.[0] && load(e.target.files[0])} />
+            <input
+              type="file"
+              accept=".evo"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Reset so choosing the same file again still fires onChange.
+                e.target.value = "";
+                if (file) void load(file);
+              }}
+            />
           </label>
         </div>
       </header>
