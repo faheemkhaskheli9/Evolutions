@@ -25,8 +25,9 @@ impl Simulation {
         json!({
             "templates": templates::templates().iter().map(|t| json!({
                 "key": t.key, "name": t.name, "description": t.description,
-                "founders": t.founders,
+                "founders": t.founders, "gen": t.gen,
             })).collect::<Vec<_>>(),
+            "default_gen": crate::world::WorldGenParams::default(),
             "species": species_lib::library().iter().map(|s| json!({
                 "key": s.key, "name": s.name, "description": s.description,
                 "color": s.color,

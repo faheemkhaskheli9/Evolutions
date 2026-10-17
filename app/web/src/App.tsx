@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
-import type { Catalog, FromWorker, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
+import type { AutosaveInfo, Catalog, FromWorker, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
 import { PhyloTree } from "./components/PhyloTree";
@@ -8,6 +8,7 @@ import { EventsPanel } from "./components/EventsPanel";
 import { Inspector } from "./components/Inspector";
 import { WorldPanel } from "./components/WorldPanel";
 import { NewWorldDialog } from "./components/NewWorldDialog";
+import { RunUntil } from "./components/RunUntil";
 import { describeSpeed, downloadBlob, formatDate, formatYears, SPEEDS, type RGB } from "./util";
 
 type Tab = "species" | "tree" | "events" | "inspect" | "world";
@@ -22,6 +23,7 @@ interface WorldState {
 export default function App() {
   const client = useMemo(() => new EngineClient(), []);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [autosave, setAutosave] = useState<AutosaveInfo | null>(null);
   const [world, setWorld] = useState<WorldState | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -38,6 +40,7 @@ export default function App() {
   const [inspectData, setInspectData] = useState<Record<string, unknown> | null>(null);
   const [layer, setLayer] = useState<Layer>("terrain");
   const [layerData, setLayerData] = useState<Float32Array | null>(null);
+  const [densitySpecies, setDensitySpecies] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>("inspect");
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [notices, setNotices] = useState<{ id: number; text: string; error?: boolean }[]>([]);
@@ -60,6 +63,7 @@ export default function App() {
       switch (m.type) {
         case "ready":
           setCatalog(m.catalog);
+          setAutosave(m.autosave);
           break;
         case "created":
           setWorld({ info: m.world, elevation: m.elevation, biome: m.biome, water: m.water });
@@ -72,6 +76,7 @@ export default function App() {
           setShowNew(false);
           setBusy(false);
           setLayerData(null);
+          setDensitySpecies(null);
           break;
         case "frame": {
           const f = frame.current;
@@ -163,6 +168,10 @@ export default function App() {
   }, [layer, world, client]);
 
   useEffect(() => {
+    if (world) client.send({ type: "density", on: layer === "population", species: densitySpecies });
+  }, [layer, densitySpecies, world, client]);
+
+  useEffect(() => {
     if (species.length && selectedSpecies === null) setSelectedSpecies(species[0].id);
   }, [species, selectedSpecies]);
 
@@ -189,6 +198,10 @@ export default function App() {
     setBusy(true);
     const bytes = await file.arrayBuffer();
     client.send({ type: "load", bytes }, [bytes]);
+  };
+  const restore = () => {
+    setBusy(true);
+    client.send({ type: "restore" });
   };
   const setSpeedAndSend = (v: number) => {
     setSpeed(v);
@@ -350,6 +363,8 @@ export default function App() {
                 species={species}
                 layer={layer}
                 setLayer={setLayer}
+                densitySpecies={densitySpecies}
+                setDensitySpecies={setDensitySpecies}
                 tool={tool}
                 setTool={setTool}
                 modeChoice={modeChoice}
@@ -395,6 +410,7 @@ export default function App() {
               +{y >= 1000 ? `${y / 1000}k` : y} yr
             </button>
           ))}
+          <RunUntil catalog={catalog} species={species} disabled={!world || !!progress} onRun={(years, until) => client.send({ type: "jump", years, until })} />
         </div>
       </footer>
 
@@ -421,7 +437,7 @@ export default function App() {
         ))}
       </div>
 
-      {showNew && <NewWorldDialog catalog={catalog} onCreate={create} onLoad={load} onClose={world ? () => setShowNew(false) : undefined} busy={busy} />}
+      {showNew && <NewWorldDialog catalog={catalog} onCreate={create} onLoad={load} autosave={world ? null : autosave} onRestore={restore} onClose={world ? () => setShowNew(false) : undefined} busy={busy} />}
     </div>
   );
 }

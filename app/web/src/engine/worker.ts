@@ -3,7 +3,8 @@
 // to the UI (System Design §5 and §7).
 
 import init, { Engine } from "../wasm/evo_wasm.js";
-import type { FrameMsg, FromWorker, ModeChoice, ToWorker } from "./protocol";
+import { readAutosave, writeAutosave } from "./autosave";
+import type { FrameMsg, FromWorker, ModeChoice, SimEvent, SpeciesInfo, StopCondition, ToWorker } from "./protocol";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -22,8 +23,15 @@ let capExceeded = false;
 let jumping = false;
 let cancelJump = false;
 
+let densityOn = false;
+let densitySpecies: number | null = null;
+let lastAutosave = 0;
+let autosavedYear = -1;
+let autosaving = false;
+
 /** Above this speed the engine uses Population mode in Auto (sim-seconds per second). */
 const POPULATION_SPEED = 30 * 86400;
+const AUTOSAVE_MS = 60_000;
 
 function post(msg: FromWorker, transfer: Transferable[] = []) {
   ctx.postMessage(msg, transfer);
@@ -47,6 +55,25 @@ function replaceEngine(next: Engine) {
   playing = false;
 }
 
+/** Keeps the latest world in IndexedDB so a closed tab can resume (PRD FR-P1). */
+function autosave() {
+  lastAutosave = performance.now();
+  if (!engine || autosaving || engine.year() === autosavedYear) return;
+  const info = JSON.parse(engine.world_info());
+  const year = engine.year();
+  const bytes = engine.save();
+  autosaving = true;
+  writeAutosave({ template: info.template, seed: info.seed, year, savedAt: Date.now() }, bytes.buffer as ArrayBuffer)
+    .then(() => {
+      autosavedYear = year;
+    })
+    // Storage can be unavailable (private windows, quota); autosave is best-effort.
+    .catch(() => {})
+    .finally(() => {
+      autosaving = false;
+    });
+}
+
 function sendCreated() {
   if (!engine) return;
   post(
@@ -60,7 +87,9 @@ function sendCreated() {
   );
   eventsSent = 0;
   lastSpeciesPost = 0;
+  autosavedYear = -1;
   sendFrame(true);
+  autosave();
 }
 
 function sendFrame(full = false) {
@@ -85,10 +114,10 @@ function sendFrame(full = false) {
     msg.actions = engine.frame_actions();
     transfer.push(msg.positions.buffer, msg.species.buffer, msg.actions.buffer);
   }
-  if (status.mode === "Population" || status.focus) {
+  if (status.mode === "Population" || status.focus || densityOn) {
     if (full || now - lastDensityPost > 300) {
       lastDensityPost = now;
-      msg.density = engine.density(-1);
+      msg.density = engine.density(densityOn && densitySpecies !== null ? densitySpecies : -1);
       msg.dominant = engine.dominant();
       transfer.push(msg.density.buffer, msg.dominant.buffer);
     }
@@ -162,6 +191,7 @@ function loop() {
   }
   try {
     if (engine && !jumping) sendFrame();
+    if (engine && !jumping && now - lastAutosave > AUTOSAVE_MS) autosave();
   } catch (e) {
     fail(e);
   } finally {
@@ -169,32 +199,68 @@ function loop() {
   }
 }
 
-async function jump(years: number) {
+/** Returns why `until` is met now, or null. `seen` is the event count already checked. */
+function conditionMet(e: Engine, until: StopCondition, seen: { events: number }): string | null {
+  if (until.kind === "speciation" || until.kind === "extinction") {
+    const kind = until.kind === "speciation" ? "Speciation" : "Extinction";
+    const fresh: SimEvent[] = JSON.parse(e.events(seen.events));
+    seen.events += fresh.length;
+    const hit = fresh.find((ev) => ev.kind === kind);
+    return hit ? hit.text : null;
+  }
+  const crossed = (v: number) => (until.op === "below" ? v < until.value : v > until.value);
+  if (until.kind === "population" && until.species === null) {
+    const n = e.population();
+    return crossed(n) ? `Population ${until.op} ${until.value.toLocaleString()} (now ${n.toLocaleString()}).` : null;
+  }
+  const sp = (JSON.parse(e.species()) as SpeciesInfo[]).find((s) => s.id === until.species);
+  if (!sp) return null;
+  if (until.kind === "population") {
+    return crossed(sp.n) ? `${sp.common_name}: population ${until.op} ${until.value.toLocaleString()} (now ${sp.n.toLocaleString()}).` : null;
+  }
+  const v = sp.mean?.[until.trait];
+  return v !== undefined && sp.n > 0 && crossed(v) ? `${sp.common_name}: trait ${until.op} ${until.value} (now ${v.toPrecision(3)}).` : null;
+}
+
+async function jump(years: number, until?: StopCondition) {
   if (!engine) return;
   jumping = true;
   cancelJump = false;
   const wasPlaying = playing;
   playing = false;
+  let reason: string | null = null;
   try {
     if (engine.mode() === "Individual" && years > 2) engine.set_mode("Population");
     const startYear = engine.year();
     const target = startYear + years;
-    while (engine.year() < target && !cancelJump) {
+    const seen = { events: JSON.parse(engine.status()).events as number };
+    // A condition that already holds would stop at once; only react to it becoming true.
+    const armed = !until || until.kind === "speciation" || until.kind === "extinction" || conditionMet(engine, until, { events: 0 }) === null;
+    while (engine.year() < target && !cancelJump && !reason) {
       const t0 = performance.now();
-      while (engine.year() < target && performance.now() - t0 < 40) engine.step(1);
+      while (engine.year() < target && performance.now() - t0 < 40) {
+        engine.step(1);
+        if (until && armed && (reason = conditionMet(engine, until, seen))) break;
+      }
       post({ type: "progress", done: engine.year() - startYear, total: years, label: `Year ${Math.floor(engine.year()).toLocaleString()}` });
       sendFrame();
       await new Promise((r) => setTimeout(r, 0));
       if (engine.population() === 0) break;
     }
+    if (until && !armed) post({ type: "notice", message: "That condition already holds, so the run went the full length." });
+    else if (until && !reason && !cancelJump) post({ type: "notice", message: `Ran ${years.toLocaleString()} years without the condition being met.` });
   } catch (e) {
     fail(e);
   }
   jumping = false;
-  playing = wasPlaying;
+  playing = wasPlaying && !reason;
   post({ type: "jumpDone" });
+  if (reason && engine) post({ type: "notice", message: `Stopped in year ${Math.floor(engine.year()).toLocaleString()}: ${reason}` });
   try {
-    if (engine) sendFrame(true);
+    if (engine) {
+      sendFrame(true);
+      autosave();
+    }
   } catch (e) {
     fail(e);
   }
@@ -212,6 +278,15 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
       case "load":
         replaceEngine(Engine.load(new Uint8Array(m.bytes)));
         sendCreated();
+        break;
+      case "restore":
+        readAutosave()
+          .then((slot) => {
+            if (!slot) throw new Error("There is no autosaved world.");
+            replaceEngine(Engine.load(new Uint8Array(slot.bytes)));
+            sendCreated();
+          })
+          .catch(fail);
         break;
       case "play":
         playing = true;
@@ -247,7 +322,7 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         }
         break;
       case "jump":
-        void jump(m.years);
+        void jump(m.years, m.until);
         break;
       case "cancel":
         cancelJump = true;
@@ -275,6 +350,11 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
           post({ type: "layer", kind: m.kind, data }, [data.buffer]);
         }
         break;
+      case "density":
+        densityOn = m.on;
+        densitySpecies = m.species;
+        sendFrame(true);
+        break;
       case "save":
         if (engine) {
           const bytes = engine.save();
@@ -290,7 +370,8 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
   }
 };
 
-init().then(() => {
-  post({ type: "ready", catalog: JSON.parse(Engine.catalog()) });
+init().then(async () => {
+  const slot = await readAutosave().catch(() => undefined);
+  post({ type: "ready", catalog: JSON.parse(Engine.catalog()), autosave: slot?.info ?? null });
   loop();
 }, fail);

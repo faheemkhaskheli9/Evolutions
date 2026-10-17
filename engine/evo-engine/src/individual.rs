@@ -27,6 +27,9 @@ pub struct Grid {
     /// Predator indices per cell (CSR, like `start`/`items`).
     pub pred_start: Vec<u32>,
     pub pred_items: Vec<u32>,
+    /// Scratch buffers reused between builds: each animal's tile, and CSR fill cursors.
+    tiles: Vec<u32>,
+    fill: Vec<u32>,
 }
 
 impl Grid {
@@ -36,8 +39,11 @@ impl Grid {
         self.start.resize(n + 1, 0);
         self.predators.clear();
         self.predators.resize(n, 0);
-        let tiles: Vec<usize> = animals.iter().map(|a| world.tile_of(a.x, a.y)).collect();
-        for (a, &t) in animals.iter().zip(&tiles) {
+        self.tiles.clear();
+        self.tiles
+            .extend(animals.iter().map(|a| world.tile_of(a.x, a.y) as u32));
+        for (a, &t) in animals.iter().zip(&self.tiles) {
+            let t = t as usize;
             self.start[t + 1] += 1;
             if a.d.meat_eff > 0.3 {
                 self.predators[t] = self.predators[t].saturating_add(1);
@@ -46,25 +52,29 @@ impl Grid {
         for i in 0..n {
             self.start[i + 1] += self.start[i];
         }
-        let mut fill = self.start.clone();
+        self.fill.clear();
+        self.fill.extend_from_slice(&self.start[..n]);
         self.items.clear();
         self.items.resize(animals.len(), 0);
-        for (i, &t) in tiles.iter().enumerate() {
-            self.items[fill[t] as usize] = i as u32;
-            fill[t] += 1;
+        for (i, &t) in self.tiles.iter().enumerate() {
+            let f = &mut self.fill[t as usize];
+            self.items[*f as usize] = i as u32;
+            *f += 1;
         }
         self.pred_start.clear();
         self.pred_start.resize(n + 1, 0);
         for i in 0..n {
             self.pred_start[i + 1] = self.pred_start[i] + self.predators[i] as u32;
         }
-        let mut pfill = self.pred_start.clone();
+        self.fill.clear();
+        self.fill.extend_from_slice(&self.pred_start[..n]);
         self.pred_items.clear();
         self.pred_items.resize(self.pred_start[n] as usize, 0);
-        for (i, (a, &t)) in animals.iter().zip(&tiles).enumerate() {
+        for (i, (a, &t)) in animals.iter().zip(&self.tiles).enumerate() {
+            let t = t as usize;
             if a.d.meat_eff > 0.3 && self.predators[t] < u16::MAX {
-                self.pred_items[pfill[t] as usize] = i as u32;
-                pfill[t] += 1;
+                self.pred_items[self.fill[t] as usize] = i as u32;
+                self.fill[t] += 1;
             }
         }
     }
@@ -110,19 +120,42 @@ fn wrap_dx(dx: f32, w: f32) -> f32 {
     }
 }
 
-/// Tiles within `r` tiles of (x, y), as a list of tile indices.
-fn tiles_around(world: &World, x: f32, y: f32, r: f32) -> Vec<usize> {
-    let ri = r.ceil() as i64;
+/// Largest search radius in tiles; perception reach is clamped to this.
+const MAX_REACH: f32 = 2.0;
+const MAX_NEAR: usize = (2 * MAX_REACH as usize + 1) * (2 * MAX_REACH as usize + 1);
+
+/// Tile indices around a point, stored inline so hot loops do not allocate.
+struct Near {
+    tiles: [usize; MAX_NEAR],
+    len: usize,
+}
+
+impl std::ops::Deref for Near {
+    type Target = [usize];
+    fn deref(&self) -> &[usize] {
+        &self.tiles[..self.len]
+    }
+}
+
+/// Tiles within `r` tiles of (x, y) (`r` is capped at `MAX_REACH`).
+fn tiles_around(world: &World, x: f32, y: f32, r: f32) -> Near {
+    let ri = r.min(MAX_REACH).ceil() as i64;
     let (tx, ty) = (x.floor() as i64, y.floor() as i64);
-    let mut out = Vec::with_capacity(((2 * ri + 1) * (2 * ri + 1)) as usize);
-    for dy in -ri..=ri {
-        let yy = ty + dy;
-        if yy < 0 || yy >= world.h as i64 {
-            continue;
-        }
-        for dx in -ri..=ri {
-            let xx = (tx + dx).rem_euclid(world.w as i64);
-            out.push(yy as usize * world.w + xx as usize);
+    let mut out = Near {
+        tiles: [0; MAX_NEAR],
+        len: 0,
+    };
+    let mut cols = [0usize; 2 * MAX_REACH as usize + 1];
+    let nc = (2 * ri + 1) as usize;
+    for (k, c) in cols[..nc].iter_mut().enumerate() {
+        *c = (tx - ri + k as i64).rem_euclid(world.w as i64) as usize;
+    }
+    let (y0, y1) = ((ty - ri).max(0), (ty + ri).min(world.h as i64 - 1));
+    for yy in y0..=y1 {
+        let row = yy as usize * world.w;
+        for &c in &cols[..nc] {
+            out.tiles[out.len] = row + c;
+            out.len += 1;
         }
     }
     out
@@ -314,7 +347,7 @@ impl Simulation {
                 let me = &self.animals[i];
                 let p_detect = 0.25 + 0.6 * me.pheno.get(Trait::Senses);
                 let mut best: Option<(f32, f32, f32)> = None;
-                for &t in &near {
+                for &t in near.iter() {
                     for &j in self.grid.preds(t) {
                         let o = &self.animals[j as usize];
                         if !o.alive
@@ -781,7 +814,7 @@ impl Simulation {
         let choosy = me.pheno.get(Trait::Choosiness);
         let mut best: Option<(f32, usize)> = None;
         let mut nearest_male: Option<(f32, f32, f32)> = None;
-        for &t in &near {
+        for &t in near.iter() {
             for &j in self.grid.cell(t) {
                 let j = j as usize;
                 let o = &self.animals[j];

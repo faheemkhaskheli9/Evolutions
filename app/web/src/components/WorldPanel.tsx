@@ -8,6 +8,8 @@ interface Props {
   species: SpeciesInfo[];
   layer: Layer;
   setLayer: (l: Layer) => void;
+  densitySpecies: number | null;
+  setDensitySpecies: (id: number | null) => void;
   tool: Tool;
   setTool: (t: Tool) => void;
   modeChoice: ModeChoice;
@@ -41,6 +43,25 @@ export function WorldPanel(p: Props) {
           </button>
         ))}
       </div>
+      {p.layer === "population" && (
+        <label className="row gap small">
+          Density of
+          <select
+            value={p.densitySpecies ?? ""}
+            onChange={(e) => p.setDensitySpecies(e.target.value === "" ? null : Number(e.target.value))}
+            aria-label="Density layer species"
+          >
+            <option value="">all species</option>
+            {p.species
+              .filter((s) => s.extinct_year === null || s.id === p.densitySpecies)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.common_name}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
 
       <h3>Simulation detail</h3>
       <div className="segmented" role="radiogroup" aria-label="Fidelity mode">
