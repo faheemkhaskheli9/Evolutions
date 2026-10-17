@@ -40,8 +40,13 @@ try {
   await step("engine loads and shows the new-world dialog", async () => {
     await page.getByText("Create a world").waitFor({ timeout: 20000 });
   });
-  await step("create Earth-like world", async () => {
+  await step("customise world settings", async () => {
     await page.getByRole("button", { name: /Earth-like Continent/ }).click();
+    await page.getByLabel("Customise world settings").check();
+    await page.getByLabel("World size").selectOption({ label: "Small (96 × 48)" });
+    await page.getByLabel("World size").selectOption({ label: "Medium (128 × 64)" });
+  });
+  await step("create Earth-like world", async () => {
     await page.getByRole("button", { name: "Create world" }).click();
     await page.locator(".badge").waitFor({ timeout: 30000 });
   });
@@ -81,10 +86,25 @@ try {
     await page.getByRole("tab", { name: /Chronicle/ }).click();
     await page.locator(".events li").first().waitFor();
   });
-  await step("population layer and watch region", async () => {
+  await step("population layer for one species", async () => {
     await page.getByRole("tab", { name: "World" }).click();
     await page.getByRole("button", { name: "Population density" }).click();
+    const select = page.getByLabel("Density layer species");
+    const id = await select.locator("option").nth(1).getAttribute("value");
+    await select.selectOption(id);
     await page.waitForTimeout(500);
+  });
+  await step("run until a threshold", async () => {
+    await page.getByRole("button", { name: "Run until…" }).click();
+    await page.getByLabel("Stop condition").selectOption("population");
+    await page.getByLabel("Direction").selectOption("above");
+    await page.getByLabel("Threshold").fill("1");
+    await page.getByLabel("Maximum years").selectOption("100");
+    await page.getByRole("button", { name: "Run", exact: true }).click();
+    // Already above 1, so the run goes the full length and says so.
+    await page.getByText(/condition already holds/).waitFor({ timeout: 120000 });
+  });
+  await step("watch region", async () => {
     await page.getByRole("button", { name: "Terrain & biomes" }).click();
     await page.getByRole("button", { name: /Watch region/ }).click();
     const box = await page.locator("canvas.map").boundingBox();
@@ -98,6 +118,13 @@ try {
     await page.getByRole("button", { name: "-2 °C" }).click();
     await page.getByRole("tab", { name: /Chronicle/ }).click();
     await page.getByText(/Climate shift/).first().waitFor();
+  });
+  await step("autosave offers to resume after a reload", async () => {
+    await page.waitForTimeout(500);
+    await page.reload();
+    await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Resume" }).click();
+    await page.locator(".badge").waitFor({ timeout: 30000 });
   });
   const fatal = errors.filter((e) => !/favicon/.test(e));
   if (fatal.length) throw new Error(`page errors:\n${fatal.join("\n")}`);

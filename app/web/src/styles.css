@@ -392,6 +392,23 @@ canvas.tool-founders {
   margin-left: auto;
   flex-wrap: wrap;
 }
+.run-until {
+  position: relative;
+}
+.run-until .popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 15;
+  display: grid;
+  gap: 8px;
+  width: min(280px, calc(100vw - 32px));
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
 
 /* Panels */
 .species-list {
@@ -668,6 +685,34 @@ table.founders td:first-child {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.resume {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.customise {
+  margin: 4px 0 8px;
+  font-size: 13px;
+}
+.settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 8px;
+  padding: 10px;
+  background: var(--panel-2);
+  border-radius: var(--radius);
+}
+.setting {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.error-text {
+  color: var(--danger);
 }
 .footer {
   margin-top: 14px;

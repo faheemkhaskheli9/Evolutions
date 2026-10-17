@@ -10,15 +10,36 @@ export interface FounderGroup {
   delay_years?: number;
 }
 
+export type LandShape = "Plates" | "Archipelago" | "Supercontinent" | "Flat" | "Rift" | "MainlandAndIslands";
+
+/** World-generator settings (PRD FR-W1); mirrors the engine's `WorldGenParams`. */
+export interface WorldGenParams {
+  width: number;
+  height: number;
+  lat_north: number;
+  lat_south: number;
+  shape: LandShape;
+  land_fraction: number;
+  plates: number;
+  roughness: number;
+  mountain_height_m: number;
+  temp_offset: number;
+  precip_factor: number;
+  axial_tilt: number;
+}
+
 export interface NewWorldConfig {
   template: string;
   seed: number;
+  /** Overrides the template's generator settings when present. */
+  gen?: WorldGenParams | null;
   founders?: FounderGroup[];
   realism?: "Strict" | "Accelerated";
 }
 
 export interface Catalog {
-  templates: { key: string; name: string; description: string; founders: FounderGroup[] }[];
+  templates: { key: string; name: string; description: string; founders: FounderGroup[]; gen: WorldGenParams }[];
+  default_gen: WorldGenParams;
   species: { key: string; name: string; description: string; color: [number, number, number] }[];
   traits: { key: string; label: string; unit: string }[];
   biomes: string[];
@@ -94,21 +115,39 @@ export interface TraitRow {
   origin: number | null;
 }
 
+/** The world kept in the browser's autosave slot (PRD FR-P1). */
+export interface AutosaveInfo {
+  template: string;
+  seed: number;
+  year: number;
+  savedAt: number;
+}
+
+/** When a "run until" fast-forward stops early (PRD FR-T3). */
+export type StopCondition =
+  | { kind: "speciation" }
+  | { kind: "extinction" }
+  | { kind: "population"; species: number | null; op: "below" | "above"; value: number }
+  | { kind: "trait"; species: number; trait: number; op: "below" | "above"; value: number };
+
 export type ToWorker =
   | { type: "create"; config: NewWorldConfig }
   | { type: "load"; bytes: ArrayBuffer }
+  | { type: "restore" }
   | { type: "play" }
   | { type: "pause" }
   | { type: "speed"; simSecondsPerSecond: number }
   | { type: "mode"; mode: ModeChoice }
   | { type: "focus"; rect: [number, number, number, number] }
-  | { type: "jump"; years: number }
+  | { type: "jump"; years: number; until?: StopCondition }
   | { type: "cancel" }
   | { type: "apply"; intervention: Record<string, unknown> }
   | { type: "pick"; x: number; y: number; radius: number }
   | { type: "inspect"; id: number }
   | { type: "speciesDetail"; id: number }
   | { type: "layer"; kind: string }
+  /** Whether the density map layer is shown, and for which species (null = all). */
+  | { type: "density"; on: boolean; species: number | null }
   | { type: "save" }
   | { type: "newick" };
 
@@ -129,7 +168,7 @@ export interface FrameMsg {
 }
 
 export type FromWorker =
-  | { type: "ready"; catalog: Catalog }
+  | { type: "ready"; catalog: Catalog; autosave: AutosaveInfo | null }
   | { type: "created"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array }
   | FrameMsg
   | { type: "progress"; done: number; total: number; label: string }

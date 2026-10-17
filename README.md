@@ -24,13 +24,14 @@ npm run dev           # open the printed URL
 ```
 
 In the app:
-- Pick a template (or **Random world**), adjust the founder species, and press **Create world**.
+- Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons.
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan.
 - **Jump ahead** (+100 to +100k years) fast-forwards in Population mode.
+- **Run until…** fast-forwards until a new species arises, a species goes extinct, or a population or trait crosses a threshold.
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
 - The **World** tab has map layers and interventions (climate shift, meteor, introduced species, epidemic).
-- **Save** and **Open** store whole worlds in `.evo` files.
+- **Save** and **Open** store whole worlds in `.evo` files. The current world is also autosaved in the browser, and the start dialog offers to resume it.
 
 ### Headless CLI
 

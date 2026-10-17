@@ -598,3 +598,45 @@ fn newick_nests_multiple_daughters_by_age() {
         "{nwk}"
     );
 }
+
+/// Custom generator settings (FR-W1) override the template, and nonsense settings are
+/// rejected instead of producing a broken world.
+#[test]
+fn custom_world_settings_apply_and_are_validated() {
+    let world = |gen: WorldGenParams| {
+        Simulation::new(NewWorld {
+            template: "random".into(),
+            seed: 4,
+            gen: Some(gen),
+            founders: Some(vec![]),
+            realism: None,
+        })
+    };
+    let gen = WorldGenParams {
+        width: 64,
+        height: 32,
+        land_fraction: 0.7,
+        ..WorldGenParams::default()
+    };
+    let s = world(gen.clone()).unwrap();
+    assert_eq!((s.world.w, s.world.h), (64, 32));
+    let land = s.world.land_tiles() as f64 / (64.0 * 32.0);
+    assert!((0.55..0.85).contains(&land), "land fraction {land}");
+    for bad in [
+        WorldGenParams {
+            lat_north: -10.0,
+            lat_south: 10.0,
+            ..gen.clone()
+        },
+        WorldGenParams {
+            land_fraction: 1.5,
+            ..gen.clone()
+        },
+        WorldGenParams {
+            axial_tilt: f64::NAN,
+            ..gen.clone()
+        },
+    ] {
+        assert!(world(bad).is_err());
+    }
+}

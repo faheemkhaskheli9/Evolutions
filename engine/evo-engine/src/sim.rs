@@ -123,6 +123,23 @@ impl Simulation {
         if gen.width < 8 || gen.height < 8 || gen.width * gen.height > 1 << 20 {
             return Err("world size must be between 8×8 and ~1M tiles".into());
         }
+        if !(-90.0..=90.0).contains(&gen.lat_south)
+            || !(-90.0..=90.0).contains(&gen.lat_north)
+            || gen.lat_north <= gen.lat_south
+        {
+            return Err("latitudes must lie in −90…90 with north above south".into());
+        }
+        if !(0.0..=1.0).contains(&gen.land_fraction)
+            || !(0.0..=90.0).contains(&gen.axial_tilt)
+            || gen.precip_factor.is_nan()
+            || gen.precip_factor < 0.0
+            || !gen.temp_offset.is_finite()
+            || !gen.roughness.is_finite()
+        {
+            return Err(
+                "invalid world settings (land fraction, tilt, rainfall or temperature)".into(),
+            );
+        }
         let world = World::generate(gen, cfg.seed);
         let mut params = SimParams::default();
         if let Some(r) = cfg.realism {
