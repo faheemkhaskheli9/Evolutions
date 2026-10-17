@@ -271,9 +271,8 @@ impl Simulation {
         let d = derive(&pheno, mass);
         let id = self.next_id;
         self.next_id += 1;
-        let birth_minute = self
-            .minutes
-            .saturating_sub((age_days as f64 * self.params.day_minutes as f64) as u64);
+        let birth_minute =
+            self.minutes as i64 - (age_days as f64 * self.params.day_minutes as f64) as i64;
         Animal {
             id,
             species,
@@ -400,13 +399,14 @@ impl Simulation {
                 }
             }
         }
+        let any_prey = prey.iter().any(|&p| p > 0.0);
         let mut best = (0.0f32, usize::MAX);
         for i in 0..n {
             if !in_region(i) {
                 continue;
             }
             let mut s = score(i);
-            if !herbivore && prey.iter().any(|&p| p > 0.0) {
+            if !herbivore && any_prey {
                 let (x, y) = ((i % w.w) as i64, (i / w.w) as i64);
                 let mut around = 0.0;
                 for dy in -2..=2i64 {
@@ -669,11 +669,12 @@ impl Simulation {
         }
         match target {
             Mode::Population => {
+                // Restore frozen demes first so animals that wandered out of the focus
+                // region merge into them instead of forming duplicate (species, patch) demes.
+                let frozen = std::mem::take(&mut self.frozen);
+                self.demes.extend(frozen);
                 let animals = std::mem::take(&mut self.animals);
                 self.absorb_into_demes(animals);
-                for d in std::mem::take(&mut self.frozen) {
-                    self.demes.push(d);
-                }
                 self.demes.sort_by_key(|d| (d.species, d.patch));
                 self.focus = None;
                 self.mode = Mode::Population;
@@ -1110,7 +1111,7 @@ impl Simulation {
                 let ps = self.params.patch_size as f32;
                 let pw = self.patches_w();
                 let mut rng = Rng::keyed(self.seed, self.minutes, 0, stream::EVENTS);
-                for d in self.demes.iter_mut() {
+                for d in self.demes.iter_mut().chain(self.frozen.iter_mut()) {
                     let (px, py) = (
                         (d.patch as usize % pw) as f32,
                         (d.patch as usize / pw) as f32,
@@ -1120,6 +1121,7 @@ impl Simulation {
                     }
                 }
                 self.demes.retain(|d| d.total() > 0);
+                self.frozen.retain(|d| d.total() > 0);
                 for i in 0..self.world.w * self.world.h {
                     let (x, y) = (
                         (i % self.world.w) as f32 + 0.5,
@@ -1142,6 +1144,12 @@ impl Simulation {
                 self.add_founders(&group)?;
             }
             Intervention::Plague { species, mortality } => {
+                let name = self
+                    .species
+                    .list
+                    .get(species as usize)
+                    .map(|s| s.common_name.clone())
+                    .ok_or_else(|| format!("unknown species {species}"))?;
                 let m = mortality.clamp(0.0, 1.0) as f64;
                 let mut rng = Rng::keyed(self.seed, self.minutes, species as u64, stream::EVENTS);
                 let mut killed = 0;
@@ -1152,16 +1160,16 @@ impl Simulation {
                     }
                 }
                 self.animals.retain(|a| a.alive);
-                for d in self.demes.iter_mut().filter(|d| d.species == species) {
+                for d in self
+                    .demes
+                    .iter_mut()
+                    .chain(self.frozen.iter_mut())
+                    .filter(|d| d.species == species)
+                {
                     killed += d.cull(m, &mut rng);
                 }
                 self.demes.retain(|d| d.total() > 0);
-                let name = self
-                    .species
-                    .list
-                    .get(species as usize)
-                    .map(|s| s.common_name.clone())
-                    .unwrap_or_default();
+                self.frozen.retain(|d| d.total() > 0);
                 self.event(
                     EventKind::Intervention,
                     Some(species),

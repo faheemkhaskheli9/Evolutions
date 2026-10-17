@@ -7,7 +7,7 @@ use crate::sim::{Mode, Simulation};
 use crate::species_lib;
 use crate::templates;
 use crate::traits::{Trait, N_TRAITS};
-use crate::world::Biome;
+use crate::world::{Biome, World};
 use serde_json::{json, Value};
 
 /// Visible organisms for one rendered frame.
@@ -82,7 +82,7 @@ impl Simulation {
                 .list
                 .iter()
                 .map(|s| {
-                    let last = self.metrics.series.get(&s.id).and_then(|v| v.last());
+                    let last = self.last_sample(s.id);
                     json!({
                         "id": s.id,
                         "name": s.name,
@@ -100,6 +100,14 @@ impl Simulation {
                 })
                 .collect(),
         )
+    }
+
+    /// Latest non-empty trait sample, so extinct species keep their final trait values.
+    fn last_sample(&self, species: u32) -> Option<&crate::record::Sample> {
+        self.metrics
+            .series
+            .get(&species)
+            .and_then(|v| v.iter().rev().find(|l| l.n > 0))
     }
 
     pub fn metrics_json(&self, species: u32) -> Value {
@@ -130,25 +138,32 @@ impl Simulation {
             if children.is_empty() {
                 return format!("{}:{:.1}", label, end - s.origin_year);
             }
+            let origins: Vec<f64> = children
+                .iter()
+                .map(|&c| sim.species.get(c).origin_year)
+                .collect();
             // A split leaves the parent continuing as a sibling of each daughter.
             let mut node = format!(
                 "{}:{:.1}",
                 label,
-                end - children
-                    .iter()
-                    .map(|&c| sim.species.get(c).origin_year)
-                    .fold(f64::MIN, f64::max)
+                end - origins.iter().copied().fold(f64::MIN, f64::max)
             );
-            let mut last = s.origin_year;
-            for &c in &children {
-                let co = sim.species.get(c).origin_year;
+            // Nest from the most recent split outwards so the oldest split sits at the root
+            // of this clade; each internal branch spans the time back to the previous split.
+            let mut order: Vec<usize> = (0..children.len()).collect();
+            order.sort_by(|&a, &b| origins[a].total_cmp(&origins[b]));
+            for (k, &i) in order.iter().enumerate().rev() {
+                let prev = if k == 0 {
+                    s.origin_year
+                } else {
+                    origins[order[k - 1]]
+                };
                 node = format!(
                     "({},{}):{:.1}",
                     node,
-                    rec(sim, c, now),
-                    (co - last).max(0.0)
+                    rec(sim, children[i], now),
+                    (origins[i] - prev).max(0.0)
                 );
-                last = co;
             }
             node
         }
@@ -227,7 +242,10 @@ impl Simulation {
         let doy = self.day_of_year();
         match kind {
             "elevation" => w.elevation.clone(),
-            "temperature" => (0..n).map(|i| w.temp_day(i, doy)).collect(),
+            "temperature" => {
+                let sc = World::season_cos(doy);
+                (0..n).map(|i| w.temp_season(i, sc)).collect()
+            }
             "temp_mean" => (0..n).map(|i| w.temp_mean(i)).collect(),
             "precip" => w.precip.clone(),
             "biome" => w.biome.iter().map(|b| *b as u8 as f32).collect(),
@@ -342,8 +360,10 @@ impl Simulation {
 
     /// Trait-by-trait summary of a species (latest sample vs. its origin).
     pub fn trait_table(&self, species: u32) -> Value {
-        let s = self.species.get(species);
-        let last = self.metrics.series.get(&species).and_then(|v| v.last());
+        let Some(s) = self.species.list.get(species as usize) else {
+            return Value::Null;
+        };
+        let last = self.last_sample(species);
         Value::Array(
             (0..N_TRAITS)
                 .map(|i| {

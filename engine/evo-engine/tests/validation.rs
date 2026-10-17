@@ -513,3 +513,88 @@ fn v_s1_allopatric_speciation() {
     );
     assert!(alive >= 2, "no speciation across the barrier");
 }
+
+/// Founders are created with their starting age even at year 0, so Population mode
+/// sorts adults into adult age classes instead of treating everyone as a newborn.
+#[test]
+fn founders_keep_their_age_at_world_start() {
+    let s = blank(41);
+    assert_eq!(s.minutes, 0);
+    let dm = s.params.day_minutes;
+    let adults: Vec<_> = s.animals.iter().filter(|a| a.dev_days > 30.0).collect();
+    assert!(!adults.is_empty());
+    for a in adults {
+        assert!((a.age_days(s.minutes, dm) - a.dev_days).abs() < 1.0);
+    }
+}
+
+/// Animals that leave a focus region merge back into the frozen demes of the patch
+/// they ended up in rather than creating a second deme for that (species, patch).
+#[test]
+fn leaving_focus_region_does_not_duplicate_demes() {
+    let mut s = blank(31);
+    s.run_steps(24 * 30);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(3.0);
+    let before = s.population();
+    s.focus_region(0, 0, 15, 15).unwrap();
+    s.run_steps(24 * 60);
+    s.set_mode(Mode::Population).unwrap();
+    let mut keys: Vec<_> = s.demes.iter().map(|d| (d.species, d.patch)).collect();
+    let n = keys.len();
+    keys.dedup();
+    assert_eq!(keys.len(), n, "duplicate (species, patch) demes");
+    assert!(s.population() > 0 && before > 0);
+}
+
+/// Interventions reach the whole world while a focus region is active.
+#[test]
+fn plague_reaches_frozen_demes_during_focus() {
+    let mut s = blank(32);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(2.0);
+    s.focus_region(0, 0, 7, 7).unwrap();
+    assert!(!s.frozen.is_empty());
+    for id in 0..s.species.list.len() as u32 {
+        s.apply(evo_engine::sim::Intervention::Plague {
+            species: id,
+            mortality: 1.0,
+        })
+        .unwrap();
+    }
+    assert_eq!(s.population(), 0);
+    assert!(s
+        .apply(evo_engine::sim::Intervention::Plague {
+            species: 999,
+            mortality: 0.5,
+        })
+        .is_err());
+}
+
+/// With two daughters, the oldest split is the root of the clade and every tip is
+/// the same age as the parent lineage.
+#[test]
+fn newick_nests_multiple_daughters_by_age() {
+    let mut s = blank(33);
+    let mut p = s.species.list[0].clone();
+    p.id = 0;
+    p.parent = None;
+    p.extinct_year = None;
+    p.name = "P p".into();
+    p.origin_year = s.year() - 300.0;
+    let mut a = p.clone();
+    a.id = 1;
+    a.parent = Some(0);
+    a.name = "A a".into();
+    a.origin_year = s.year() - 200.0;
+    let mut b = a.clone();
+    b.id = 2;
+    b.name = "B b".into();
+    b.origin_year = s.year() - 100.0;
+    s.species.list = vec![p, a, b];
+    let nwk = s.newick();
+    assert!(
+        nwk.contains("((P_p:100.0,B_b:100.0):100.0,A_a:200.0):100.0"),
+        "{nwk}"
+    );
+}

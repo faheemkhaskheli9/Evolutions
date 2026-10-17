@@ -30,7 +30,21 @@ function post(msg: FromWorker, transfer: Transferable[] = []) {
 }
 
 function fail(e: unknown) {
+  // A Rust panic traps the WASM instance and leaves the engine unusable; drop it so the
+  // UI asks for a new world instead of failing on every call.
+  if (e instanceof WebAssembly.RuntimeError) {
+    engine = null;
+    playing = false;
+    post({ type: "error", message: `The simulation crashed (${e.message}). Create or open a world to continue.` });
+    return;
+  }
   post({ type: "error", message: e instanceof Error ? e.message : String(e) });
+}
+
+function replaceEngine(next: Engine) {
+  engine?.free();
+  engine = next;
+  playing = false;
 }
 
 function sendCreated() {
@@ -146,8 +160,13 @@ function loop() {
       fail(e);
     }
   }
-  if (engine && !jumping) sendFrame();
-  setTimeout(loop, 33);
+  try {
+    if (engine && !jumping) sendFrame();
+  } catch (e) {
+    fail(e);
+  } finally {
+    setTimeout(loop, 33);
+  }
 }
 
 async function jump(years: number) {
@@ -174,7 +193,11 @@ async function jump(years: number) {
   jumping = false;
   playing = wasPlaying;
   post({ type: "jumpDone" });
-  sendFrame(true);
+  try {
+    if (engine) sendFrame(true);
+  } catch (e) {
+    fail(e);
+  }
 }
 
 ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
@@ -182,15 +205,12 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
   try {
     switch (m.type) {
       case "create":
-        engine?.free();
-        engine = new Engine(JSON.stringify(m.config));
-        playing = false;
+        // Build the new engine before freeing the old one so a failure keeps the current world.
+        replaceEngine(new Engine(JSON.stringify(m.config)));
         sendCreated();
         break;
       case "load":
-        engine?.free();
-        engine = Engine.load(new Uint8Array(m.bytes));
-        playing = false;
+        replaceEngine(Engine.load(new Uint8Array(m.bytes)));
         sendCreated();
         break;
       case "play":
@@ -243,13 +263,11 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         if (engine) post({ type: "inspect", data: JSON.parse(engine.inspect(m.id)) });
         break;
       case "speciesDetail":
-        if (engine)
-          post({
-            type: "speciesDetail",
-            id: m.id,
-            traits: JSON.parse(engine.trait_table(m.id)),
-            metrics: JSON.parse(engine.metrics(m.id)),
-          });
+        if (engine) {
+          const traits = JSON.parse(engine.trait_table(m.id));
+          // null: the species id belongs to a world that has since been replaced.
+          if (traits) post({ type: "speciesDetail", id: m.id, traits, metrics: JSON.parse(engine.metrics(m.id)) });
+        }
         break;
       case "layer":
         if (engine) {

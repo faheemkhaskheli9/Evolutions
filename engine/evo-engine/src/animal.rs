@@ -117,7 +117,8 @@ pub struct Animal {
     pub y: f32,
     /// Travel target (tile coordinates) when moving between tiles.
     pub target: Option<(f32, f32)>,
-    pub birth_minute: u64,
+    /// Negative for founders created older than the world clock.
+    pub birth_minute: i64,
     pub mother: u64,
     pub father: u64,
     pub generation: u32,
@@ -153,7 +154,7 @@ pub struct Animal {
 
 impl Animal {
     pub fn age_days(&self, now_minute: u64, day_minutes: u64) -> f32 {
-        (now_minute.saturating_sub(self.birth_minute)) as f32 / day_minutes as f32
+        (now_minute as i64 - self.birth_minute).max(0) as f32 / day_minutes as f32
     }
 
     pub fn is_mature(&self) -> bool {
