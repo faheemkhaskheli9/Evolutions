@@ -41,3 +41,43 @@ This plan comes from an audit of the engine and app against the PRD and TRD. Ite
 | **FR-P2** replay log | **Next.** Record interventions and mode switches with their timestamps, so a run from the same seed replays identically in the browser. |
 
 The e2e smoke test (`app/web/e2e/smoke.mjs`) covers custom settings, a single-species density layer, **Run until**, and resuming the autosave after a reload.
+
+## Phase 5: Second audit (done)
+
+A second audit, of the web app and the engine, found the bugs below. All are fixed. Each engine fix has a regression test in `engine/evo-engine/tests/validation.rs`, and the e2e smoke test now checks the region-then-jump case.
+
+### Engine
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | `width * height` could overflow in the world-size check, so a huge custom size passed it and terrain generation panicked (a WASM trap in the browser). `plates` and `mountain_height_m` were not checked at all. | `checked_mul` for the size; `plates` must be 1–64 and the mountain height 0–20,000 m (`bad_world_settings_are_rejected`). |
+| 2 | A founder release with no habitat (clicking open ocean) returned an error but still created a species. The next year logged it as extinct, and it showed up as a root in the tree and in the Newick export. | Habitat is found before the genome architecture and species are created (`failed_founder_release_creates_no_species`). |
+| 3 | Loading checked only the magic bytes and version, so a damaged save could load and then panic on the first step (for example, `tick_minutes = 0` divides by zero). | `Simulation::validate` checks time and patch parameters, the terrain size, and every deme's and animal's species, genome and patch (`damaged_save_is_rejected`). |
+| 4 | A watch region dragged across the east–west seam selected the inverted rectangle, nearly the whole world. Coordinates past the map gave an empty or inverted focus. | The UI sends unwrapped coordinates; `focus_region` clamps to the map and lets the region run up to one world width past the seam (`focus_region_wraps_across_the_seam`, `focus_region_clamps_to_the_map`). |
+| 5 | The east/west part of a daughter species' name averaged patch x on a line, so a range spanning the seam got the wrong side. | Circular mean of x. |
+| 6 | A meteor at `fx` outside 0–1 measured distances wrongly. | `fx` wraps and `fy` is clamped. |
+| 7 | CLI: `--individual-years` was measured from year 0 instead of the start of the run, so it did nothing for a loaded save. Bad values (`--years abc`, `--mode Individaul`) and unknown options were silently ignored, and an unreadable `--load` file panicked. | Measured from the start year; bad values and unknown options exit with a message (code 2); `--mode individual` is applied; `--debug` is documented. |
+
+### Web app
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | Watching a region locked **Simulation detail** to Individual. A jump then ended the region in Population mode, and nothing switched back: at slow speeds time barely moved, and the selector still read Individual. | The mode choice from before the region is restored once the region ends; after a jump, Individual mode is re-entered when the world fits. |
+| 2 | After **New world** or **Open**, queued Inspector requests for the old animal could be answered by the new engine, showing an unrelated animal with the same id. | Replies carry the animal id and are ignored unless it is still the one inspected. When the animal dies, the Inspector says so and stops polling. |
+| 3 | Panning more than two world widths, or zooming out, left blank strips. | The map draws as many east–west copies as fill the view. |
+| 4 | The achieved-speed label flickered between 0 and a spike in Population mode, because a one-year step lands on only some frames. | It shows the requested speed less any dropped backlog, smoothed over about a second. |
+| 5 | Choosing the same `.evo` file twice did nothing. | The file input is reset after each pick. |
+| 6 | **Run until** could send a remembered species that had since gone extinct. | A species that is no longer alive falls back to **All life**. |
+| 7 | Number boxes (founder count, release year, epidemic %) clamped on every keystroke: deleting "100" left "2". | `NumberInput` clamps on blur or Enter. |
+| 8 | Holding Space toggled play repeatedly, and Space during a jump was lost. Esc did not cancel a tool while a box had focus. | Key repeat and jumps are ignored; Esc works everywhere. |
+| 9 | Autosave was skipped when only an intervention changed the world while paused, and a new world could go unsaved for a minute if an older save was still being written. | A dirty flag replaces the year check, and a save requested during a write runs when it finishes. |
+| 10 | A jump that ended because all life died reported that the condition was never met. | It reports that all life has died out. |
+| 11 | Charts: a single sample drew empty axes; year ticks read "0.0" or "1,001"; log-scale ticks fell on values like 11,535. The **World** tab was clipped in the side panel. | One sample draws a dot; ticks use round values (powers of ten on log scales); tabs share the panel width. |
+
+The user guide is updated to match (speed presets, mode overrides, regions across the seam, autosave, keyboard), and its screenshots are regenerated, including a new one of the founder table.
+
+### Next
+
+- Replay log (FR-P2) and allele-frequency map layers (FR-O1), as listed in Phase 4.
+- Old `.evo` files from before the `uid` fields were added do not load: bincode ignores `#[serde(default)]`. Bump `MODEL_VERSION` with the next format change and add a migration.
+- `EngineClient` has no `terminate()`, so React StrictMode in development starts a second worker.

@@ -58,6 +58,8 @@ try {
   await page.getByRole("button", { name: /Earth-like Continent/ }).click();
   await page.getByLabel("Seed").fill("2024");
   await shot("01-create-world", page.locator(".modal"));
+  await page.locator("table.founders").scrollIntoViewIfNeeded();
+  await shot("03-founders", page.locator("table.founders"));
   await page.getByLabel("Customise world settings").check();
   await page.locator(".modal").evaluate((m) => (m.scrollTop = 260));
   await shot("02-world-settings", page.locator(".modal"));
