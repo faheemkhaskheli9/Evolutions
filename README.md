@@ -2,12 +2,15 @@
 
 A realistic simulation of biological evolution. Build a world (random, from a template, or your own settings), release animals and early humans, and watch them eat, drink, hunt, flee, court, breed, age and die. Fast-forward through deep time to see what the forces of real evolution make of them: natural and sexual selection, genetic drift, mutation, gene flow and speciation.
 
+Everything happens in one 3D world: mountains, seas and climate in relief, with every animal standing on the ground, which you can pan, orbit and zoom across.
+
 Nothing is scripted. Thick fur in the cold, thin coats in the desert, island populations becoming new species, predators wiping out scarce prey: all of these emerge from genes, bodies, food, climate and chance.
 
 - **User guide:** [every feature, step by step, with screenshots](docs/USER_GUIDE.md)
 - **Design documents:** [PRD](docs/PRD.md) · [TRD](docs/TRD.md) · [System Design](docs/SYSTEM_DESIGN.md) · [Improvement plan](docs/IMPROVEMENT_PLAN.md) (audits, fixes and what's next)
+- **3D world:** [Plan](docs/3D_WORLD_PLAN.md) · [PRD](docs/3D_WORLD_PRD.md) · [TRD](docs/3D_WORLD_TRD.md) · [System Design](docs/3D_WORLD_SYSTEM_DESIGN.md)
 - **Engine:** Rust (`engine/`). Headless CLI, scientific validation suite, and WebAssembly build.
-- **App:** browser UI (`app/web/`). React and TypeScript; the engine runs in a Web Worker.
+- **App:** browser UI (`app/web/`). React and TypeScript, with three.js for the 3D world; the engine runs in a Web Worker.
 
 ![A hare selected in Individual mode: the map shows the Earth-like Continent template, and the inspector lists its energy, hydration, physiology and phenotype](docs/guide/06-inspector.png)
 
@@ -54,7 +57,7 @@ npm run dev           # open the printed URL
 In the app:
 - Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons.
 - Press **Space** or ▶ to run time.
-- Click an animal to inspect it. Scroll to zoom, drag to pan.
+- Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
 - **Jump ahead** (+100 to +100k years) fast-forwards in Population mode.
 - **Run until…** fast-forwards until a new species arises, a species goes extinct, or a population or trait crosses a threshold.
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
@@ -131,13 +134,13 @@ This version implements the must-have scope of the PRD, plus several later items
 ## Repository layout
 
 ```text
-docs/                  PRD, TRD, System Design
+docs/                  PRD, TRD, System Design, 3D world documents, user guide
 engine/
   evo-engine/          simulation library (world, genetics, physiology, individual & population modes, species, API)
   evo-engine/tests/    scientific validation suite
   evo-cli/             headless runner (`evo`)
   evo-wasm/            WebAssembly bindings
-app/web/               browser app (React + Vite), engine worker, e2e smoke test
+app/web/               browser app (React + Vite + three.js), engine worker, e2e smoke test
 ```
 
 ## License

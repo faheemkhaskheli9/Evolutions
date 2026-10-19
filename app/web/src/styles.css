@@ -260,6 +260,28 @@ canvas.tool-founders {
 .empty-map {
   height: 100%;
 }
+.view-switch {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  background: rgba(15, 20, 18, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.view-switch button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #e4ece7;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.view-switch button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 .map-hint {
   position: absolute;
   left: 12px;

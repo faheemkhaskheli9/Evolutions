@@ -97,8 +97,9 @@ Click **Create world** to generate the terrain, climate, rivers and biomes and r
   - the mode badge (**Individual** or **Population**);
   - the number of living organisms and species;
   - **New world**, **Save** and **Open**.
-- **Map:** terrain and biomes, coloured by type (deserts, grasslands, forests, tundra, ice) with relief shading. Lakes and rivers are blue. The world wraps east–west, like a globe.
-  - Scroll to zoom and drag to pan.
+- **3D world:** the whole simulation in one scene. Mountains rise in relief, seas are translucent water over the sea floor, and biomes are coloured by type (deserts, grasslands, forests, tundra, ice). Every animal stands on the ground in its species colour. The world wraps east–west, like a globe.
+  - Drag to pan, scroll to zoom toward the pointer, and **right-drag** (or **Ctrl + drag**) to orbit and tilt the view.
+  - The **3D world / Flat map** switch in the top-right corner changes to a flat top-down map. The app remembers your choice. Browsers without 3D graphics (WebGL) get the flat map automatically.
   - The legend in the bottom-left corner names the species colours.
 - **Side panel:** the **Species**, **Tree**, **Chronicle**, **Inspector** and **World** tabs.
 - **Time bar:** play/pause, speed presets, the achieved speed, **Jump ahead** buttons and **Run until…**.
@@ -107,9 +108,9 @@ Click **Create world** to generate the terrain, climate, rivers and biomes and r
 
 ## 3. Watch individual animals
 
-Press **▶** (or **Space**). In Individual mode every animal lives hour by hour: it forages, looks for water, rests in shade when hot, flees predators, hunts, courts, gives birth and nurses its young. Zoom in to see each animal as a dot in its species colour.
+Press **▶** (or **Space**). In Individual mode every animal lives hour by hour: it forages, looks for water, rests in shade when hot, flees predators, hunts, courts, gives birth and nurses its young. Zoom in to see each animal as a small four-legged figure in its species colour; resting animals crouch. Far away, figures keep a minimum size so a herd stays visible.
 
-![Zoomed in: hares and deer as individual dots on the terrain](guide/05-individuals-zoomed.png)
+![Zoomed in: hares and deer standing on the terrain](guide/05-individuals-zoomed.png)
 
 **Click an animal** to open the **Inspector**. A yellow ring marks it on the map, and the panel updates live as it lives its life.
 
@@ -158,7 +159,7 @@ Simulating every animal hour by hour is too slow for thousands of years, so Evol
 
 ![Population mode after 2,000 years: species ranges coloured over the terrain](guide/09-population-mode.png)
 
-In Population mode the map shows species ranges as colour over the terrain. Each tile takes the colour of its most abundant species, more strongly where that species is denser.
+In Population mode the 3D world shows each population as a few translucent figures per area in its species' colour (more where it is denser), and species ranges as colour over the terrain. Each tile takes the colour of its most abundant species, more strongly where that species is denser.
 
 **Choosing the mode.** In the **World** tab, **Simulation detail** has three settings:
 
@@ -225,7 +226,9 @@ In the **World** tab, **Map layer** switches what the map shows:
 | **Temperature (today)** | Today's temperature from blue (cold) to red (hot). It changes with the seasons and with climate interventions. |
 | **Rainfall** | Annual precipitation from brown (dry) to teal (wet). Look for rain shadows behind mountain ranges. |
 | **Vegetation** | How much forage is left compared with what the land can grow. Grazing pressure shows up as browner areas. |
-| **Population density** | Organisms per tile on a heat scale, for **all species** or one species picked in **Density of**. |
+| **Population density** | Organisms per tile on a heat scale, for **all species** or one species picked in **Density of**. In the 3D world each occupied tile becomes a column: the taller and brighter, the denser. |
+
+In the 3D world the chosen layer is draped over the relief, so you can see, for example, the cold along a mountain spine or the dry side of a range.
 
 | | |
 |---|---|
@@ -311,6 +314,7 @@ Autosave is per browser and is lost if you clear site data, so use **Save** for 
 | **Esc** | Cancel the armed tool (meteor, place species, watch region), even while a box has focus. |
 | **Scroll** on the map | Zoom in or out at the cursor. |
 | **Drag** on the map | Pan. The world wraps east–west. |
+| **Right-drag**, or **Ctrl / Alt + drag** | Orbit and tilt the 3D world. |
 | **Click** an animal | Open it in the Inspector (Individual mode). |
 | **Shift + drag** on the map | Watch that region individually. The box may cross the east–west edge. |
 | **Hover** a chart | Read exact values. |

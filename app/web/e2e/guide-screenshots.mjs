@@ -136,20 +136,28 @@ try {
   await page.getByRole("button", { name: "Run until…" }).click();
 
   console.log("7. Watch a region");
-  await page.getByRole("button", { name: /Watch region/ }).click();
   const b = await mapBox();
   const [rx, ry] = [b.x + b.width * 0.62, b.y + b.height * 0.55];
-  await page.mouse.move(rx, ry);
-  await page.mouse.down();
-  await page.mouse.move(rx + b.width * 0.12, ry + b.height * 0.18, { steps: 10 });
-  await page.mouse.up();
-  await page.waitForTimeout(1500);
+  // A box holding more animals than the Individual-mode cap is refused; try smaller ones.
+  let size = 0;
+  for (size of [0.12, 0.08, 0.05, 0.03]) {
+    await page.getByRole("button", { name: /Watch region/ }).click();
+    await page.mouse.move(rx, ry);
+    await page.mouse.down();
+    await page.mouse.move(rx + b.width * size, ry + b.height * size * 1.5, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(1500);
+    if (/region/.test((await page.locator(".badge").textContent()) ?? "")) break;
+  }
+  await noToasts();
+  await zoomAt(rx + (b.width * size) / 2, ry + (b.height * size * 1.5) / 2, 4);
   await page.getByRole("radio", { name: "1 hour/s" }).click();
   await page.getByRole("button", { name: "Play" }).click();
   await page.waitForTimeout(2500);
   await page.getByRole("button", { name: "Pause" }).click();
   await noToasts();
   await shot("19-watch-region");
+  await zoomAt(rx + (b.width * size) / 2, ry + (b.height * size * 1.5) / 2, -4);
 
   console.log("8. Interventions");
   await page.getByRole("radio", { name: "Population" }).click();

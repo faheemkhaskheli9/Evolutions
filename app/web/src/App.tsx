@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
 import type { AutosaveInfo, Catalog, FromWorker, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
@@ -11,7 +11,20 @@ import { NewWorldDialog } from "./components/NewWorldDialog";
 import { RunUntil } from "./components/RunUntil";
 import { describeSpeed, downloadBlob, formatDate, formatYears, SPEEDS, type RGB } from "./util";
 
+// three.js is large; load it only when the 3D view is shown.
+const WorldView3D = lazy(() => import("./components/WorldView3D").then((m) => ({ default: m.WorldView3D })));
+
 type Tab = "species" | "tree" | "events" | "inspect" | "world";
+type View = "3d" | "map";
+
+const VIEW_KEY = "evolutions.view";
+function savedView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "map" ? "map" : "3d";
+  } catch {
+    return "3d";
+  }
+}
 
 interface WorldState {
   info: WorldInfo;
@@ -42,6 +55,7 @@ export default function App() {
   const [layerData, setLayerData] = useState<Float32Array | null>(null);
   const [densitySpecies, setDensitySpecies] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>("inspect");
+  const [view, setView] = useState<View>(savedView);
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [notices, setNotices] = useState<{ id: number; text: string; error?: boolean }[]>([]);
   const [showNew, setShowNew] = useState(true);
@@ -87,9 +101,11 @@ export default function App() {
           if (m.positions) {
             f.positions = m.positions;
             f.species = m.species;
+            f.actions = m.actions;
           } else if (m.status.mode === "Population") {
             f.positions = undefined;
             f.species = undefined;
+            f.actions = undefined;
           }
           if (m.density) {
             f.density = m.density;
@@ -218,8 +234,40 @@ export default function App() {
     setSpeed(v);
     client.send({ type: "speed", simSecondsPerSecond: v });
   };
+  const chooseView = (v: View) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // Storage may be blocked; the choice then lasts for this session only.
+    }
+  };
   const apply = (iv: Record<string, unknown>) => client.send({ type: "apply", intervention: iv });
   const selected = inspectData && !inspectData.gone && typeof inspectData.x === "number" ? { x: inspectData.x as number, y: inspectData.y as number } : null;
+
+  const mapProps = world && {
+    world: world.info,
+    elevation: world.elevation,
+    biome: world.biome,
+    water: world.water,
+    frame,
+    frameVersion,
+    speciesColors,
+    layer,
+    layerData,
+    selected,
+    tool,
+    onPick: (x: number, y: number, r: number) => client.send({ type: "pick", x, y, radius: r }),
+    onRegion: (rect: [number, number, number, number]) => {
+      setTool("inspect");
+      client.send({ type: "focus", rect });
+    },
+    onToolClick: (fx: number, fy: number) => {
+      if (tool === "meteor") apply({ kind: "Meteor", fx, fy, radius: 0.06 });
+      if (tool === "founders") apply({ kind: "AddFounders", group: { species: founderSpecies, count: founderCount, diversity: 0.8, region: [fx, fy, 0.04] } });
+      setTool("inspect");
+    },
+  };
 
   if (!catalog) {
     return (
@@ -279,32 +327,36 @@ export default function App() {
 
       <main className="main">
         <section className="map-wrap">
-          {world ? (
-            <MapView
-              world={world.info}
-              elevation={world.elevation}
-              biome={world.biome}
-              water={world.water}
-              frame={frame}
-              frameVersion={frameVersion}
-              speciesColors={speciesColors}
-              layer={layer}
-              layerData={layerData}
-              selected={selected}
-              tool={tool}
-              onPick={(x, y, r) => client.send({ type: "pick", x, y, radius: r })}
-              onRegion={(rect) => {
-                setTool("inspect");
-                client.send({ type: "focus", rect });
-              }}
-              onToolClick={(fx, fy) => {
-                if (tool === "meteor") apply({ kind: "Meteor", fx, fy, radius: 0.06 });
-                if (tool === "founders") apply({ kind: "AddFounders", group: { species: founderSpecies, count: founderCount, diversity: 0.8, region: [fx, fy, 0.04] } });
-                setTool("inspect");
-              }}
-            />
+          {mapProps ? (
+            view === "3d" ? (
+              <Suspense fallback={<div className="empty-map" />}>
+                <WorldView3D
+                  {...mapProps}
+                  onUnsupported={() => {
+                    chooseView("map");
+                    notify("3D needs WebGL, which this browser does not provide. Showing the flat map.", true);
+                  }}
+                />
+              </Suspense>
+            ) : (
+              <MapView {...mapProps} />
+            )
           ) : (
             <div className="empty-map" />
+          )}
+          {world && (
+            <div className="view-switch" role="radiogroup" aria-label="View">
+              {(
+                [
+                  ["3d", "3D world"],
+                  ["map", "Flat map"],
+                ] as [View, string][]
+              ).map(([k, label]) => (
+                <button key={k} role="radio" aria-checked={view === k} className={view === k ? "active" : ""} onClick={() => chooseView(k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
           {capExceeded && status?.mode === "Population" && (
             <div className="map-hint">
