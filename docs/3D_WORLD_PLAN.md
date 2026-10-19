@@ -55,7 +55,7 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | # | Task | Result |
 |---|---|---|
 | 4.1 | Reuse the herd instanced mesh between frames instead of reallocating it. | Population mode no longer rebuilds GPU buffers every frame. |
-| 4.1b | Level of detail: a 36-triangle body for herds and for animals shorter than 28 px on screen (the detailed body is ~290 triangles). | Population mode drew tens of millions of triangles per frame; it now draws about an eighth of that, which keeps the page responsive on weak GPUs. |
+| 4.1b | Level of detail: a 36-triangle body for herds and for animals shorter than 16 px on screen (the detailed body is ~290 triangles). | Population mode drew tens of millions of triangles per frame; it now draws about an eighth of that, which keeps the page responsive on weak GPUs. |
 | 4.2 | End-to-end smoke test passes with the 3D view as the default. | |
 | 4.3 | User guide and README describe the 3D world, with screenshots. | |
 

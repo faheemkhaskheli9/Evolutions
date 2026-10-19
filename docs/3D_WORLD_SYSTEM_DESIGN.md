@@ -65,7 +65,7 @@ Rendering is on demand: nothing redraws while the simulation is paused and the c
 | Terrain (×3 copies) | `Mesh` sharing one indexed `BufferGeometry` + `MeshLambertMaterial` with the layer `CanvasTexture` | Copies at x = −w, 0, +w give a seamless east–west wrap. One vertex per tile centre plus a wrap column. |
 | Sea | `Mesh` (plane), translucent, no depth write | At y = −0.02 over three world widths. |
 | Open sea | Two `Mesh` strips (children of the sea) | North and south of the world, at the mean ocean depth and colour, so the edges disappear. |
-| Individuals | `InstancedMesh` (detailed or simple body) | One instance per animal; colour per species; crouched when resting; yaw hashed from index. Geometry switches to the 36-triangle body when a figure is under 28 px long. |
+| Individuals | `InstancedMesh` (detailed or simple body) | One instance per animal; colour per species; crouched when resting; yaw hashed from index. Geometry switches to the 36-triangle body when a figure is under 16 px long. |
 | Herds | `InstancedMesh` (simple body, opacity 0.8) | 1–4 figures per occupied tile, in the dominant species' colour; skipped inside the watched region. |
 | Density columns | Same mesh slot, unit box | Height and heat-ramp colour from log density. Replaces herds on the density layer. |
 | Watched region | `LineSegments` (box edges), white | |
@@ -89,7 +89,7 @@ Animals, herds and the selection ring stand at `heightAt`, so they sit on the te
 ```text
 unitsPerPixel = 2 · distance · tan(FOV/2) / canvasHeight
 bodySize      = clamp(9 · unitsPerPixel, 0.12, 4)    (≥ ~9 px on screen)
-detailed body when bodySize / unitsPerPixel ≥ 28 px, else simple body
+detailed body when bodySize / unitsPerPixel ≥ 16 px, else simple body
 herds always use the simple body
 ```
 

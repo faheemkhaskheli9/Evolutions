@@ -71,7 +71,7 @@ function simpleAnimalGeometry() {
 }
 
 /** Below this on-screen body length (px) animals use the simple geometry. */
-const DETAIL_PX = 28;
+const DETAIL_PX = 16;
 
 /** Hash an index to an angle so a herd does not all face the same way. */
 const yawOf = (i: number) => (((i * 2654435761) >>> 0) / 4294967296) * Math.PI * 2;
@@ -119,6 +119,10 @@ export class World3D {
   /** Camera x when animals and herds were last laid out (they sit on the nearest copy). */
   private layoutTx = NaN;
   private disposed = false;
+  /** Distance that shows the whole world; zooming out stops a little beyond it. */
+  private fitDistance = 100;
+  /** Until the user moves the camera, resizing reframes the whole world. */
+  private userMoved = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -399,14 +403,34 @@ export class World3D {
 
   /** Look at the whole world from the south. */
   fit() {
-    const aspect = this.camera.aspect || 1.6;
-    const half = Math.tan(((FOV / 2) * Math.PI) / 180);
-    const span = Math.max(this.h * 0.8, this.w / aspect) * 0.52;
     this.cam.tx = this.w / 2;
     this.cam.ty = this.h / 2;
     this.cam.yaw = 0;
     this.cam.pitch = (62 * Math.PI) / 180;
-    this.cam.distance = Math.max(4, span / half);
+    // The nearest distance at which all four corners of the world are on screen.
+    const corners = [
+      [0, 0],
+      [this.w, 0],
+      [0, this.h],
+      [this.w, this.h],
+    ].map(([x, z]) => new THREE.Vector3(x, 0, z));
+    const fits = (d: number) => {
+      this.cam.distance = d;
+      this.updateCamera();
+      return corners.every((c) => {
+        const v = c.clone().project(this.camera);
+        return Math.abs(v.x) <= 0.96 && Math.abs(v.y) <= 0.96 && v.z < 1;
+      });
+    };
+    let lo = 1;
+    let hi = Math.max(this.w, this.h) * 4;
+    for (let i = 0; i < 30; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) hi = mid;
+      else lo = mid;
+    }
+    this.cam.distance = this.fitDistance = Math.max(4, hi);
+    this.userMoved = false;
     this.requestRender();
   }
 
@@ -423,7 +447,8 @@ export class World3D {
 
   zoom(factor: number, toward: THREE.Vector3 | null) {
     const c = this.cam;
-    const maxDist = Math.max(this.w, this.h) * 1.6;
+    this.userMoved = true;
+    const maxDist = Math.max(Math.max(this.w, this.h) * 1.6, this.fitDistance * 1.3);
     const nd = Math.max(1.2, Math.min(maxDist, c.distance * factor));
     const f = 1 - nd / c.distance;
     if (toward) {
@@ -435,12 +460,14 @@ export class World3D {
   }
 
   pan(dx: number, dz: number) {
+    this.userMoved = true;
     this.cam.tx += dx;
     this.cam.ty += dz;
     return this.clampCamera();
   }
 
   rotate(dyaw: number, dpitch: number) {
+    this.userMoved = true;
     this.cam.yaw += dyaw;
     this.cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, this.cam.pitch + dpitch));
     this.requestRender();
@@ -516,6 +543,7 @@ export class World3D {
     if (cw === 0 || ch === 0) return;
     this.renderer.setSize(cw, ch, false);
     this.camera.aspect = cw / ch;
+    if (!this.userMoved) this.fit();
     this.lastSize = -1;
     this.requestRender();
   }

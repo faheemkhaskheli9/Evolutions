@@ -66,6 +66,9 @@ try {
       return a ? m.toScreen(a[0], a[1]) : null;
     });
     if (!pos) throw new Error("no animals in frame");
+    const view = await page.locator("canvas.map").boundingBox();
+    if (pos[0] < view.x || pos[0] > view.x + view.width || pos[1] < view.y || pos[1] > view.y + view.height)
+      throw new Error(`first animal is off screen at ${pos.map(Math.round)}`);
     await page.mouse.click(pos[0], pos[1]);
     await page.getByText("Energy reserves").waitFor({ timeout: 5000 });
   });
