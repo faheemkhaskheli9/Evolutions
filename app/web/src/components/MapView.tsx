@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { WorldInfo } from "../engine/protocol";
+import type { Hydrology, WorldInfo } from "../engine/protocol";
 import type { RGB } from "../util";
 import { buildDemes, buildScalar, buildTerrain, type Layer } from "./mapLayers";
 
@@ -12,8 +12,15 @@ export interface FrameData {
   positions?: Float32Array;
   species?: Uint32Array;
   actions?: Uint8Array;
+  ids?: Float64Array;
+  shape?: Float32Array;
   density?: Float32Array;
   dominant?: Uint32Array;
+  snow?: Float32Array;
+  /** Day of the year, with the time of day as the fraction. */
+  day?: number;
+  /** Simulated seconds per real second while playing, 0 while paused. */
+  speed?: number;
 }
 
 export interface MapProps {
@@ -21,12 +28,15 @@ export interface MapProps {
   elevation: Float32Array;
   biome: Float32Array;
   water: Float32Array;
+  hydro: Hydrology;
   frame: React.MutableRefObject<FrameData>;
   frameVersion: number;
   speciesColors: Map<number, RGB>;
   layer: Layer;
   layerData: Float32Array | null;
   selected: { x: number; y: number } | null;
+  /** Id of the inspected animal (the 3D world can follow it). */
+  selectedId: number | null;
   tool: Tool;
   onPick: (x: number, y: number, radius: number) => void;
   onRegion: (rect: [number, number, number, number]) => void;

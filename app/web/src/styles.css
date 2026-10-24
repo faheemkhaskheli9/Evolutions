@@ -282,6 +282,20 @@ canvas.tool-founders {
   background: var(--accent);
   color: var(--accent-ink);
 }
+.follow-button {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  background: rgba(15, 20, 18, 0.8);
+  color: #e4ece7;
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.follow-button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 .map-hint {
   position: absolute;
   left: 12px;

@@ -1,7 +1,7 @@
 //! World: terrain, hydrology, climate, biomes and vegetation (TRD §5.1–5.3).
 
 mod climate;
-mod hydrology;
+pub mod hydrology;
 mod terrain;
 
 pub use climate::Biome;

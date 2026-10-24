@@ -4,8 +4,11 @@ import { BIOME_COLORS, RAIN_RAMP, ramp, TEMP_RAMP, VEG_RAMP, type RGB } from "..
 
 export type Layer = "terrain" | "temperature" | "rainfall" | "vegetation" | "population";
 
-/** Terrain image: biome colours with hillshading, water by depth. */
-export function buildTerrain(world: WorldInfo, elevation: Float32Array, biome: Float32Array, water: Float32Array) {
+/**
+ * Terrain image: biome colours with hillshading, water by depth. With `rivers` false,
+ * river tiles show the land they run through (the 3D world draws rivers as water).
+ */
+export function buildTerrain(world: WorldInfo, elevation: Float32Array, biome: Float32Array, water: Float32Array, rivers = true) {
   const { w, h } = world;
   const c = document.createElement("canvas");
   c.width = w;
@@ -20,7 +23,7 @@ export function buildTerrain(world: WorldInfo, elevation: Float32Array, biome: F
       if (wt === 1) {
         const depth = Math.min(1, -elevation[i] / 4000);
         col = ramp([[64, 120, 170], [22, 52, 98]], depth);
-      } else if (wt === 2 || wt === 3) {
+      } else if (wt === 2 || (wt === 3 && rivers)) {
         col = [62, 122, 178];
       } else {
         col = BIOME_COLORS[biome[i] | 0] ?? [120, 120, 120];
@@ -91,6 +94,25 @@ export function buildDemes(world: WorldInfo, density: Float32Array, dominant: Ui
     img.data[i * 4 + 1] = col[1];
     img.data[i * 4 + 2] = col[2];
     img.data[i * 4 + 3] = heat ? 220 : 50 + 130 * t;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Snow lying on land and lakes (not the open sea): white, as opaque as the cover is deep. */
+export function buildSnow(world: WorldInfo, snow: Float32Array, water: Float32Array) {
+  const { w, h } = world;
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  for (let i = 0; i < Math.min(w * h, snow.length); i++) {
+    if (water[i] === 1 || snow[i] <= 0) continue;
+    img.data[i * 4] = 244;
+    img.data[i * 4 + 1] = 247;
+    img.data[i * 4 + 2] = 252;
+    img.data[i * 4 + 3] = 225 * snow[i];
   }
   ctx.putImageData(img, 0, 0);
   return c;

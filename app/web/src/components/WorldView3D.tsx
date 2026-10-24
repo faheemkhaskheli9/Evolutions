@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type * as THREE from "three";
 import { World3D, type Rect } from "../render/world3d";
-import { buildDemes, buildScalar, buildTerrain } from "./mapLayers";
+import { buildDemes, buildScalar, buildSnow, buildTerrain } from "./mapLayers";
 import type { MapProps } from "./MapView";
 
 interface Props extends MapProps {
@@ -17,7 +17,8 @@ interface Props extends MapProps {
  * shift-drag to watch a region.
  */
 export function WorldView3D(props: Props) {
-  const { world, elevation, biome, water, frame, frameVersion, speciesColors, layer, layerData, selected, tool } = props;
+  const { world, elevation, biome, water, hydro, frame, frameVersion, speciesColors, layer, layerData, selected, selectedId, tool } = props;
+  const [following, setFollowing] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<World3D | null>(null);
   const composite = useRef<HTMLCanvasElement | null>(null);
@@ -44,6 +45,7 @@ export function WorldView3D(props: Props) {
       return;
     }
     sceneRef.current = scene;
+    scene.onFollowLost = () => setFollowing(false);
     scene.resize();
     const ro = new ResizeObserver(() => scene.resize());
     ro.observe(canvas);
@@ -55,10 +57,13 @@ export function WorldView3D(props: Props) {
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.setWorld(world.w, world.h, elevation);
-  }, [world, elevation]);
+    sceneRef.current?.setWorld(world.w, world.h, elevation, water, hydro);
+  }, [world, elevation, water, hydro]);
 
-  const terrain = useMemo(() => buildTerrain(world, elevation, biome, water), [world, elevation, biome, water]);
+  // Rivers are drawn as water in the scene, so the ground under them shows its biome.
+  const terrain = useMemo(() => buildTerrain(world, elevation, biome, water, false), [world, elevation, biome, water]);
+  const snowSource = frame.current.snow;
+  const snow = useMemo(() => (snowSource ? buildSnow(world, snowSource, water) : null), [world, snowSource, water]);
   const overlay = useMemo(
     () => (layerData && layer !== "terrain" && layer !== "population" ? buildScalar(world, layerData, layer, water) : null),
     [world, layerData, layer, water],
@@ -78,20 +83,31 @@ export function WorldView3D(props: Props) {
     const ctx = c.getContext("2d")!;
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(terrain, 0, 0);
-    if (overlay) ctx.drawImage(overlay, 0, 0);
     const rangesVisible = layer === "terrain" || layer === "population";
+    if (snow && rangesVisible) ctx.drawImage(snow, 0, 0);
+    if (overlay) ctx.drawImage(overlay, 0, 0);
     const showRanges = rangesVisible && !!f.density && !!f.dominant && (f.mode === "Population" || !!f.focus || layer === "population");
     if (showRanges) ctx.drawImage(buildDemes(world, f.density!, f.dominant!, speciesColors, layer === "population"), 0, 0);
     scene.setTexture(c);
     // Herds stand on the map wherever animals are not simulated one by one, and on the density layer.
     scene.setHerds(f.density, f.dominant, speciesColors, layer === "population", showRanges);
-    scene.setAnimals(layer === "population" ? undefined : f.positions, f.species, f.actions, speciesColors);
+    scene.setAnimals(layer === "population" ? undefined : f.positions, f.species, f.actions, f.ids, f.shape, speciesColors);
     scene.setFocus(f.focus);
-  }, [frameVersion, world, terrain, overlay, layer, speciesColors, frame]);
+    scene.setClock(f.day ?? 0.5, f.speed ?? 0);
+  }, [frameVersion, world, terrain, overlay, snow, layer, speciesColors, frame]);
 
   useEffect(() => {
-    sceneRef.current?.setSelected(selected);
-  }, [selected]);
+    sceneRef.current?.setSelected(selected, selectedId);
+  }, [selected, selectedId]);
+
+  // Following ends when the inspected animal changes or is gone.
+  const canFollow = selectedId !== null && !!frame.current.ids;
+  useEffect(() => {
+    setFollowing(false);
+  }, [selectedId]);
+  useEffect(() => {
+    sceneRef.current?.follow(following && selectedId !== null ? selectedId : null);
+  }, [following, selectedId]);
 
   // Test hook: screen position of a tile coordinate (used by the end-to-end test).
   useEffect(() => {
@@ -184,16 +200,28 @@ export function WorldView3D(props: Props) {
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`map world3d tool-${tool}`}
-      onWheel={onWheel}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onContextMenu={(e) => e.preventDefault()}
-      aria-label="3D world. Drag to pan, right-drag to orbit, scroll to zoom, click an animal to inspect it, shift-drag to watch a region."
-      role="img"
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className={`map world3d tool-${tool}`}
+        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onContextMenu={(e) => e.preventDefault()}
+        aria-label="3D world. Drag to pan, right-drag to orbit, scroll to zoom, click an animal to inspect it, shift-drag to watch a region."
+        role="img"
+      />
+      {(canFollow || following) && (
+        <button
+          className={`follow-button${following ? " active" : ""}`}
+          aria-pressed={following}
+          onClick={() => setFollowing((v) => !v)}
+          title="Keep the camera on the inspected animal. Dragging the map stops following."
+        >
+          {following ? "Following" : "Follow animal"}
+        </button>
+      )}
+    </>
   );
 }

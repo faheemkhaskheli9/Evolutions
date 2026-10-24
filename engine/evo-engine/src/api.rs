@@ -7,7 +7,7 @@ use crate::sim::{Mode, Simulation};
 use crate::species_lib;
 use crate::templates;
 use crate::traits::{Trait, N_TRAITS};
-use crate::world::{Biome, World};
+use crate::world::{hydrology, Biome, World};
 use serde_json::{json, Value};
 
 /// Visible organisms for one rendered frame.
@@ -261,6 +261,15 @@ impl Simulation {
                 })
                 .collect(),
             "npp" => w.npp.clone(),
+            "river_flow" => w.river_flow.clone(),
+            // Index of the tile each tile drains into, or -1 at an outlet.
+            "downstream" => hydrology::priority_flood(w)
+                .1
+                .iter()
+                .map(|&d| if d == usize::MAX { -1.0 } else { d as f32 })
+                .collect(),
+            // Water surface (m): a lake's level, otherwise the ground.
+            "water_level" => hydrology::priority_flood(w).0,
             "density" => self.density(None),
             _ => vec![0.0; n],
         }
