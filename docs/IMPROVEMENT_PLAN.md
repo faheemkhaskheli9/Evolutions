@@ -19,16 +19,17 @@ This plan comes from an audit of the engine and app against the PRD and TRD. Ite
 - A WASM trap (Rust panic) drops the dead engine and asks the user to create or open a world.
 - Stale `speciesDetail` requests after a world change are ignored.
 
-## Phase 3: Performance (partly done)
+## Phase 3: Performance (done)
 
 - **Done:** the seasonal cosine is computed once per day or month instead of once per tile (`World::season_cos` and `World::temp_season`).
 - **Done:** Population-mode display vegetation regrows in 12 monthly steps instead of 36 ten-day steps.
 - **Done:** the predator release no longer rescans the whole prey map for every tile (O(tiles²) to O(tiles)).
 - **Result:** a 300-year `earth` run is about 20% faster.
 - **Done:** profiling (callgrind, 100-year `earth` run) showed Individual mode taking ~85% of the time, led by `tiles_around` and `Grid::build`. `tiles_around` now returns a fixed-size inline list and wraps each column once instead of once per tile, and `Grid::build` reuses its scratch buffers. A 30-year `earth` run executes 13% fewer instructions and saves a byte-identical world.
-- **Next:** cache `patch_contexts()` between years and invalidate it on a climate shift (not yet measured separately, because it is inlined into `step_population`).
-- **Next:** store `cap_of` per deme in predation.
-- **Next:** limit species-check comparisons to nearby demes.
+- **Done:** patch contexts are cached between years and rebuilt when the climate changes (`World::revision`, bumped by `refresh_biomes`) or when the patch size or habitat area per tile changes (`patch_contexts_follow_climate_and_settings`).
+- **Done:** predation works out each hunted deme's cap once per patch instead of once per predator.
+- **Done:** species checks compare demes in the same patch first and skip any pair already joined into one cluster. The clusters are the same as before (they are the connected components, whatever order the pairs are compared in), so a hard distance limit, which would change which demes count as one species, was not needed.
+- **Result:** a 300-year `earth` run is about 7% faster (5.8 s to 5.4 s; Population mode only, 3.5 s to 3.35 s) and saves a byte-identical world. A callgrind profile of a 100-year Population-mode run shows what is left: binomial draws (~21%), `annual` (~19%), `derive` (~17%, mostly `powf`), yearly vegetation regrowth (~11%) and `merge_sorted` (~10%).
 
 ## Phase 4: Missing MVP features (done)
 

@@ -205,19 +205,38 @@ pub fn detect_splits(
 ) -> Vec<Split> {
     let n = pops.len();
     let mut dsu = Dsu((0..n).collect());
+    let try_union = |dsu: &mut Dsu, i: usize, j: usize| {
+        // A pair already joined through other populations needs no comparison: the
+        // clusters are the connected components, whichever edges are found first.
+        if pops[i].arch == pops[j].arch
+            && dsu.find(i) != dsu.find(j)
+            && compatibility(
+                &pops[i],
+                &pops[j],
+                seed,
+                params.dmi_probability,
+                params.dmi_cost,
+            ) >= params.compat_threshold
+        {
+            dsu.union(i, j);
+        }
+    };
+    // Populations sharing a patch first: they are the likeliest to be compatible, so
+    // most later pairs are already in one cluster and are skipped.
+    let mut by_patch: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for (i, p) in pops.iter().enumerate() {
+        by_patch.entry(p.patch).or_default().push(i);
+    }
+    for members in by_patch.values() {
+        for (x, &i) in members.iter().enumerate() {
+            for &j in &members[x + 1..] {
+                try_union(&mut dsu, i, j);
+            }
+        }
+    }
     for i in 0..n {
         for j in (i + 1)..n {
-            if pops[i].arch == pops[j].arch
-                && compatibility(
-                    &pops[i],
-                    &pops[j],
-                    seed,
-                    params.dmi_probability,
-                    params.dmi_cost,
-                ) >= params.compat_threshold
-            {
-                dsu.union(i, j);
-            }
+            try_union(&mut dsu, i, j);
         }
     }
     // species → component → (count, members)

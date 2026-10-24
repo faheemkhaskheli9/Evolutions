@@ -306,6 +306,28 @@ fn save_load_round_trip_continues_identically() {
     assert_eq!(a.state_hash(), b.state_hash());
 }
 
+/// Population mode reuses patch contexts between years; a climate shift or a new
+/// habitat area must rebuild them. A save has no cache, so a loaded copy is the
+/// reference: it must continue exactly like the original after each change.
+#[test]
+fn patch_contexts_follow_climate_and_settings() {
+    let mut a = blank(8);
+    a.run_steps(24 * 5);
+    a.set_mode(Mode::Population).unwrap();
+    a.run_years(5.0);
+    let changes: [fn(&mut Simulation); 2] = [
+        |s| s.world.shift_climate(-3.0),
+        |s| s.params.habitat_m2_per_tile *= 0.5,
+    ];
+    for change in changes {
+        change(&mut a);
+        let mut b = Simulation::load_bytes(&a.save_bytes().unwrap()).unwrap();
+        a.run_years(5.0);
+        b.run_years(5.0);
+        assert_eq!(a.state_hash(), b.state_hash());
+    }
+}
+
 /// V-P1 Individual ↔ Population transitions conserve abundance exactly and keep
 /// mean genetic values and neutral diversity within tolerance (TRD TR-X4).
 #[test]

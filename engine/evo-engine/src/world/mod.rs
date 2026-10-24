@@ -129,6 +129,10 @@ pub struct World {
     /// Global temperature offset applied by events and interventions, °C.
     pub global_offset: f32,
     pub has_ocean: bool,
+    /// Changes whenever the climate-derived fields are recomputed, so caches built
+    /// from them (Population-mode patch contexts) know when they are stale.
+    #[serde(skip)]
+    pub revision: u64,
 }
 
 impl World {
@@ -173,6 +177,7 @@ impl World {
             carcass: vec![0.0; n],
             global_offset: 0.0,
             has_ocean,
+            revision: 0,
         };
         climate::compute_static(&mut world);
         hydrology::compute(&mut world);
@@ -274,6 +279,8 @@ impl World {
 
     /// Recompute biome, NPP and forage capacity after a climate change.
     pub fn refresh_biomes(&mut self) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        self.revision = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         for i in 0..self.w * self.h {
             let t = self.temp_mean(i);
             let p = self.precip[i];
