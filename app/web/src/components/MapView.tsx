@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Hydrology, WorldInfo } from "../engine/protocol";
 import type { RGB } from "../util";
-import { buildDemes, buildScalar, buildTerrain, type Layer } from "./mapLayers";
+import { buildDemes, buildScalar, buildTerrain, worldCopies, type Layer } from "./mapLayers";
 
 export type { Layer } from "./mapLayers";
 export type Tool = "inspect" | "focus" | "meteor" | "founders";
@@ -92,8 +92,7 @@ export function MapView(props: MapProps) {
     ctx.imageSmoothingEnabled = false;
     const span = world.w * v.scale;
     // The world wraps east–west: draw neighbouring copies where visible.
-    const copies: number[] = [];
-    for (let k = Math.floor(-v.ox / span); v.ox + k * span < cw; k++) copies.push(k);
+    const copies = worldCopies(v.ox, span, cw);
     const f = frame.current;
     for (const k of copies) {
       const x0 = v.ox + k * span;

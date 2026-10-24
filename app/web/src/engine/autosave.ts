@@ -6,7 +6,7 @@ const DB = "evolutions";
 const STORE = "autosave";
 const KEY = "latest";
 
-interface Slot {
+export interface Slot {
   info: AutosaveInfo;
   bytes: ArrayBuffer;
 }
@@ -37,3 +37,47 @@ async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
 export const writeAutosave = (info: AutosaveInfo, bytes: ArrayBuffer) => run("readwrite", (s) => s.put({ info, bytes } satisfies Slot, KEY));
 
 export const readAutosave = () => run<Slot | undefined>("readonly", (s) => s.get(KEY));
+
+/**
+ * Decides when to write the autosave: only after the world changed (`dirty`), never two
+ * writes at once, and a save asked for during a write runs when it finishes, so a new
+ * world is not skipped. Write errors are ignored: autosave is best-effort (private
+ * windows, quota).
+ */
+export class Autosaver {
+  /** The world changed since the last autosave (time ran, an intervention, a new world). */
+  dirty = false;
+  private writing: Promise<void> | null = null;
+  private pending = false;
+
+  constructor(
+    private write: (info: AutosaveInfo, bytes: ArrayBuffer) => Promise<unknown>,
+    /** The world to save, or null when there is none. */
+    private snapshot: () => Slot | null,
+  ) {}
+
+  /** Saves if the world changed. Resolves when this save (and any queued after it) is written. */
+  save(): Promise<void> {
+    if (!this.dirty) return this.writing ?? Promise.resolve();
+    if (this.writing) {
+      this.pending = true;
+      return this.writing;
+    }
+    const slot = this.snapshot();
+    if (!slot) return Promise.resolve();
+    this.dirty = false;
+    this.writing = this.write(slot.info, slot.bytes)
+      .then(
+        () => {},
+        () => {},
+      )
+      .then(() => {
+        this.writing = null;
+        if (this.pending) {
+          this.pending = false;
+          return this.save();
+        }
+      });
+    return this.writing;
+  }
+}

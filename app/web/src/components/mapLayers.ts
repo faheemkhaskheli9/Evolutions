@@ -9,12 +9,13 @@ export type Layer = "terrain" | "temperature" | "rainfall" | "vegetation" | "pop
  * river tiles show the land they run through (the 3D world draws rivers as water).
  */
 export function buildTerrain(world: WorldInfo, elevation: Float32Array, biome: Float32Array, water: Float32Array, rivers = true) {
+  return toCanvas(world, terrainPixels(world, elevation, biome, water, rivers));
+}
+
+/** RGBA pixels of the terrain image (see `buildTerrain`). */
+export function terrainPixels(world: Pick<WorldInfo, "w" | "h">, elevation: Float32Array, biome: Float32Array, water: Float32Array, rivers = true) {
   const { w, h } = world;
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(w, h);
+  const px = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
@@ -39,23 +40,23 @@ export function buildTerrain(world: WorldInfo, elevation: Float32Array, biome: F
           col[2] * (1 + shade) + (255 - col[2]) * high,
         ];
       }
-      img.data[i * 4] = col[0];
-      img.data[i * 4 + 1] = col[1];
-      img.data[i * 4 + 2] = col[2];
-      img.data[i * 4 + 3] = 255;
+      px[i * 4] = col[0];
+      px[i * 4 + 1] = col[1];
+      px[i * 4 + 2] = col[2];
+      px[i * 4 + 3] = 255;
     }
   }
-  ctx.putImageData(img, 0, 0);
-  return c;
+  return px;
 }
 
 export function buildScalar(world: WorldInfo, data: Float32Array, layer: Layer, water: Float32Array) {
+  return toCanvas(world, scalarPixels(world, data, layer, water));
+}
+
+/** RGBA pixels of a climate, vegetation or allele-frequency layer; the sea stays clear. */
+export function scalarPixels(world: Pick<WorldInfo, "w" | "h">, data: Float32Array, layer: Layer, water: Float32Array) {
   const { w, h } = world;
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(w, h);
+  const px = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     if (water[i] === 1) continue;
     const v = data[i];
@@ -67,22 +68,25 @@ export function buildScalar(world: WorldInfo, data: Float32Array, layer: Layer, 
       if (v < 0) continue;
       col = ramp(layer === "alleles" ? ALLELE_RAMP : VEG_RAMP, v);
     }
-    img.data[i * 4] = col[0];
-    img.data[i * 4 + 1] = col[1];
-    img.data[i * 4 + 2] = col[2];
-    img.data[i * 4 + 3] = 200;
+    px[i * 4] = col[0];
+    px[i * 4 + 1] = col[1];
+    px[i * 4 + 2] = col[2];
+    px[i * 4 + 3] = 200;
   }
-  ctx.putImageData(img, 0, 0);
-  return c;
+  return px;
 }
 
 export function buildDemes(world: WorldInfo, density: Float32Array, dominant: Uint32Array, colors: Map<number, RGB>, heat: boolean) {
+  return toCanvas(world, demePixels(world, density, dominant, colors, heat));
+}
+
+/**
+ * RGBA pixels of the population layer: a heat map of density (log scale, relative to the
+ * densest tile), or each tile's dominant species, more opaque where denser.
+ */
+export function demePixels(world: Pick<WorldInfo, "w" | "h">, density: Float32Array, dominant: Uint32Array, colors: Map<number, RGB>, heat: boolean) {
   const { w, h } = world;
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(w, h);
+  const px = new Uint8ClampedArray(w * h * 4);
   let max = 0;
   for (let i = 0; i < density.length; i++) max = Math.max(max, density[i]);
   const lmax = Math.log1p(max) || 1;
@@ -91,30 +95,49 @@ export function buildDemes(world: WorldInfo, density: Float32Array, dominant: Ui
     if (d <= 0) continue;
     const t = Math.log1p(d) / lmax;
     const col: RGB = heat ? ramp([[30, 30, 80], [180, 40, 120], [255, 200, 60]], t) : colors.get(dominant[i]) ?? [255, 255, 255];
-    img.data[i * 4] = col[0];
-    img.data[i * 4 + 1] = col[1];
-    img.data[i * 4 + 2] = col[2];
-    img.data[i * 4 + 3] = heat ? 220 : 50 + 130 * t;
+    px[i * 4] = col[0];
+    px[i * 4 + 1] = col[1];
+    px[i * 4 + 2] = col[2];
+    px[i * 4 + 3] = heat ? 220 : 50 + 130 * t;
   }
-  ctx.putImageData(img, 0, 0);
-  return c;
+  return px;
 }
 
 /** Snow lying on land and lakes (not the open sea): white, as opaque as the cover is deep. */
 export function buildSnow(world: WorldInfo, snow: Float32Array, water: Float32Array) {
+  return toCanvas(world, snowPixels(world, snow, water));
+}
+
+export function snowPixels(world: Pick<WorldInfo, "w" | "h">, snow: Float32Array, water: Float32Array) {
   const { w, h } = world;
+  const px = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < Math.min(w * h, snow.length); i++) {
+    if (water[i] === 1 || snow[i] <= 0) continue;
+    px[i * 4] = 244;
+    px[i * 4 + 1] = 247;
+    px[i * 4 + 2] = 252;
+    px[i * 4 + 3] = 225 * snow[i];
+  }
+  return px;
+}
+
+/**
+ * East–west copies of the world (offsets in world widths) needed to fill a view `width`
+ * pixels wide, when copy 0 starts at `ox` and each copy is `span` pixels wide.
+ */
+export function worldCopies(ox: number, span: number, width: number): number[] {
+  const copies: number[] = [];
+  for (let k = Math.floor(-ox / span); ox + k * span < width; k++) copies.push(k);
+  return copies;
+}
+
+function toCanvas({ w, h }: WorldInfo, px: Uint8ClampedArray) {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d")!;
   const img = ctx.createImageData(w, h);
-  for (let i = 0; i < Math.min(w * h, snow.length); i++) {
-    if (water[i] === 1 || snow[i] <= 0) continue;
-    img.data[i * 4] = 244;
-    img.data[i * 4 + 1] = 247;
-    img.data[i * 4 + 2] = 252;
-    img.data[i * 4 + 3] = 225 * snow[i];
-  }
+  img.data.set(px);
   ctx.putImageData(img, 0, 0);
   return c;
 }

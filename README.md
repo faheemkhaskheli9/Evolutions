@@ -109,7 +109,12 @@ cargo run --release -p evo-cli -- info out/run.evo
 - **V-B1 cold-adaptation cline:** from the same founders, northern hares evolve thicker insulation than southern ones; this holds in 5/5 seeds.
 - **V-S1 allopatric speciation:** populations separated by straits accumulate incompatibilities and are detected as separate species.
 
-The browser app has an end-to-end smoke test: `npm run build && npm run test:e2e`.
+The browser app has, in `app/web/`:
+- **Unit tests** (Vitest, under a second): `npm test`. They cover formatting and colour ramps, chart ticks, map-layer pixels, the engine client, autosave (with a fake IndexedDB), and a regression test for each unit-testable web bug from the audits.
+- **Lint** (ESLint with the TypeScript and React Hooks rules): `npm run lint`, which fails on any warning.
+- **An end-to-end smoke test:** `npm run build && npm run test:e2e`.
+
+CI runs all three.
 
 ## Implementation status (v0.1)
 
@@ -140,7 +145,7 @@ engine/
   evo-engine/tests/    scientific validation suite
   evo-cli/             headless runner (`evo`)
   evo-wasm/            WebAssembly bindings
-app/web/               browser app (React + Vite + three.js), engine worker, e2e smoke test
+app/web/               browser app (React + Vite + three.js), engine worker, unit tests, e2e smoke test
 ```
 
 ## License

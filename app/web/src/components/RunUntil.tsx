@@ -17,6 +17,18 @@ const KINDS: { key: Kind; label: string }[] = [
   { key: "trait", label: "a trait crosses…" },
 ];
 
+/**
+ * The species a condition applies to. A remembered species that has gone extinct (or
+ * belongs to an earlier world) falls back to all life; `speciesId` is the chosen species,
+ * or the first living one, for conditions that need a single species.
+ */
+export function pickSpecies(species: SpeciesInfo[], choice: number | "all") {
+  const alive = species.filter((s) => s.extinct_year === null);
+  const sp: number | "all" = choice !== "all" && alive.some((s) => s.id === choice) ? choice : "all";
+  const speciesId = sp === "all" ? (alive[0]?.id ?? null) : sp;
+  return { alive, sp, speciesId };
+}
+
 /** "Run until" fast-forward (PRD FR-T3): jump ahead until an event or threshold. */
 export function RunUntil({ catalog, species, disabled, onRun }: Props) {
   const [open, setOpen] = useState(false);
@@ -26,10 +38,7 @@ export function RunUntil({ catalog, species, disabled, onRun }: Props) {
   const [op, setOp] = useState<"below" | "above">("below");
   const [value, setValue] = useState(1000);
   const [years, setYears] = useState(10000);
-  const alive = species.filter((s) => s.extinct_year === null);
-  // A remembered species may have gone extinct (or belong to an earlier world).
-  const sp = spChoice !== "all" && alive.some((s) => s.id === spChoice) ? spChoice : "all";
-  const speciesId = sp === "all" ? (alive[0]?.id ?? null) : sp;
+  const { alive, sp, speciesId } = pickSpecies(species, spChoice);
   const needsSpecies = kind === "trait" && speciesId === null;
 
   const run = () => {
