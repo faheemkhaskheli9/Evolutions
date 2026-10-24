@@ -95,7 +95,7 @@ export function WorldView3D(props: Props) {
     scene.setTexture(c);
     // The clock first: the inspected animal's path is stamped with the current day.
     scene.setClock(f.day ?? 0.5, f.speed ?? 0, f.days ?? 0);
-    scene.setPlants(f.forage, layer === "terrain" || layer === "vegetation");
+    scene.setPlants(f.forage, f.snow, layer === "terrain" || layer === "vegetation");
     // Herds stand on the map wherever animals are not simulated one by one, and on the density layer.
     scene.setHerds(f.density, f.dominant, speciesColors, layer === "population", showRanges);
     scene.setAnimals(layer === "population" ? undefined : f.positions, f.species, f.actions, f.ids, f.shape, speciesColors);

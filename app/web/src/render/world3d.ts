@@ -289,14 +289,43 @@ const DRY_GRASS = new THREE.Color(0.72, 0.62, 0.36);
 const LUSH_GRASS = new THREE.Color(0.3, 0.56, 0.18);
 const CONIFER = new THREE.Color(0.16, 0.36, 0.2);
 const BROADLEAF = new THREE.Color(0.25, 0.5, 0.18);
+const SPRING_LEAF = new THREE.Color(0.48, 0.66, 0.26);
+const AUTUMN_GOLD = new THREE.Color(0.86, 0.62, 0.14);
+const AUTUMN_RED = new THREE.Color(0.72, 0.24, 0.1);
+/** Bare branches, seen from afar as a grey-brown crown. */
+const BARE = new THREE.Color(0.42, 0.36, 0.3);
+const SNOW = new THREE.Color(0.95, 0.97, 1);
+/** Biomes whose broadleaf trees drop their leaves in winter (temperate grassland, forest, rainforest). */
+const DECIDUOUS = new Set([6, 7, 8]);
+/** Seasons in the plants are laid out again at most this often (ms) while the days move on. */
+const SEASON_MS = 250;
 /** Plants are drawn when a tile is at least this many pixels across. */
 const PLANT_PX = 10;
 /** Plants are laid out over a square this many tiles from the camera target (at most). */
 const PLANT_RADIUS = 70;
 const PLANT_MAX = 80_000;
+/** Sun shadow map size (texels per side). */
+const SHADOW_MAP = 2048;
 
 /** A number in [0, 1) from an integer, for placing plants the same way every time. */
 const hash01 = (i: number) => ((Math.imul(i ^ (i >>> 15), 2246822519) ^ Math.imul(i, 3266489917)) >>> 0) / 4294967296;
+
+/**
+ * Broadleaf crown colour for a day of the year counted as in the northern hemisphere
+ * (day 172 is midsummer): green through summer, gold or red in autumn, bare in winter,
+ * light green as the leaves come out in spring. `r` (0–1) varies trees: some turn
+ * red rather than gold, and not all on the same day.
+ */
+function leafColor(day: number, r: number, out: THREE.Color) {
+  const d = (((day - 8 * (r - 0.5)) % 365) + 365) % 365;
+  const t = (a: number, b: number) => THREE.MathUtils.smoothstep(d, a, b);
+  const turned = r < 0.35 ? AUTUMN_RED : AUTUMN_GOLD;
+  if (d < 105 || d >= 320) return out.copy(BARE);
+  if (d < 150) return out.copy(BARE).lerp(SPRING_LEAF, t(105, 130)).lerp(BROADLEAF, t(130, 150));
+  if (d < 255) return out.copy(BROADLEAF);
+  if (d < 290) return out.copy(BROADLEAF).lerp(turned, t(255, 285));
+  return out.copy(turned).lerp(BARE, t(295, 320));
+}
 
 /** Below this on-screen body length (px) animals use the simple geometry. */
 const DETAIL_PX = 16;
@@ -405,12 +434,13 @@ export class World3D {
   private biome = new Float32Array(1);
   private waterKind = new Float32Array(1);
   private forage: Float32Array | null = null;
+  private snow: Float32Array | null = null;
   private plantsOn = true;
   private plantMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
   private plantGeos = [coniferGeometry(), broadleafGeometry(), grassGeometry()];
   private plants: THREE.InstancedMesh[] = [];
-  /** Camera target and detail when plants were last laid out (NaN: lay out again). */
-  private plantAt = { tx: NaN, ty: NaN, radius: 0, full: false };
+  /** Camera target, detail and day when plants were last laid out (NaN: lay out again). */
+  private plantAt = { tx: NaN, ty: NaN, radius: 0, full: false, day: NaN, at: 0 };
 
   private path: { t: number; x: number; y: number }[] = [];
   private pathLine: THREE.Line;
@@ -420,6 +450,8 @@ export class World3D {
 
   private hemi = new THREE.HemisphereLight(0xdfefff, 0x4a4030, 1.6);
   private sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+  /** Unit vector towards the sun (scene axes). */
+  private sunDir = new THREE.Vector3(0, 1, 0);
   private water: THREE.Mesh[] = [];
   private riverMat = new THREE.MeshLambertMaterial({ color: 0x3e7ab2, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
   private lakeMat = new THREE.MeshLambertMaterial({
@@ -460,10 +492,16 @@ export class World3D {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // The sun casts shadows over the ground around the camera target (see placeShadows).
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+    this.sun.shadow.bias = -0.0004;
 
     this.scene.background = DAY_SKY.clone();
     this.scene.fog = new THREE.Fog(DAY_SKY.clone(), 100, 400);
-    this.scene.add(this.hemi, this.sun, this.animalSprites.points, this.herdSprites.points);
+    this.scene.add(this.hemi, this.sun, this.sun.target, this.animalSprites.points, this.herdSprites.points);
     shapeAnimals(this.animalMat, this.time);
 
     const boxGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1).translate(0.5, 0.5, 0.5));
@@ -488,6 +526,8 @@ export class World3D {
       const m = new THREE.InstancedMesh(g, this.plantMat, PLANT_MAX);
       m.count = 0;
       m.frustumCulled = false;
+      m.castShadow = true;
+      m.receiveShadow = true;
       // Allocate instance colours up front so the material compiles with them.
       m.setColorAt(0, new THREE.Color(1, 1, 1));
       return m;
@@ -559,6 +599,9 @@ export class World3D {
     this.terrain = [-1, 0, 1].map((k) => {
       const m = new THREE.Mesh(geo, this.terrainMat);
       m.position.x = k * w;
+      // Mountains shade the valleys behind them when the sun is low.
+      m.castShadow = true;
+      m.receiveShadow = true;
       // Rivers and lakes ride on each copy; picking ignores them (it hits the terrain only).
       for (const wm of this.water) {
         const c = new THREE.Mesh(wm.geometry, wm.material);
@@ -715,7 +758,9 @@ export class World3D {
     this.sun.intensity = 0.25 + 1.95 * light;
     this.hemi.intensity = 0.75 + 0.85 * light;
     // Scene x is east and z is south. At night the faint light comes from high up, like moonlight.
-    this.sun.position.set(s.east * daylight, Math.max(0.08, s.up, 1 - daylight), -s.north * daylight).normalize();
+    this.sunDir.set(s.east * daylight, Math.max(0.08, s.up, 1 - daylight), -s.north * daylight).normalize();
+    // Shadows fade out with the light: the faint night light casts none.
+    this.sun.shadow.intensity = THREE.MathUtils.smoothstep(light, 0.2, 0.6);
     // Warm at dusk, cool blue at night.
     const night = 1 - light;
     this.sun.color.setRGB(1 - 0.45 * night, 0.96 - 0.25 * dusk - 0.3 * night, 0.88 - 0.4 * dusk + 0.12 * night);
@@ -892,11 +937,19 @@ export class World3D {
     if (drop) path.splice(0, drop);
   }
 
-  /** Forage per tile (fraction of its maximum): plants are thinned where it has been eaten. */
-  setPlants(forage: Float32Array | undefined, visible: boolean) {
+  /**
+   * Forage per tile (fraction of its maximum): plants are thinned where it has been
+   * eaten. Snow cover (0–1) whitens trees and buries grass.
+   */
+  setPlants(forage: Float32Array | undefined, snow: Float32Array | undefined, visible: boolean) {
     if (forage && forage !== this.forage) {
       this.forage = forage;
       this.plantAt.tx = NaN;
+    }
+    if (snow && snow !== this.snow) {
+      // Arrives every simulated day: laid out with the season, at most every SEASON_MS.
+      this.snow = snow;
+      this.plantAt.day = NaN;
     }
     if (visible !== this.plantsOn) {
       this.plantsOn = visible;
@@ -909,24 +962,35 @@ export class World3D {
    * Trees and grass around the camera target when tiles are large enough on screen:
    * forest biomes get conifers or broadleaf trees, open land grass tufts. Grass is drawn
    * in proportion to forage and dries from green to straw as it is grazed; trees thin
-   * more slowly (browsing takes the understory first).
+   * more slowly (browsing takes the understory first). Temperate broadleaf trees turn
+   * and drop their leaves with the season of their hemisphere; snow whitens trees and
+   * buries grass.
    */
-  private layoutPlants(tilePx: number) {
+  private layoutPlants(tilePx: number, now: number) {
     const on = this.plantsOn && !!this.forage && tilePx >= PLANT_PX;
     const radius = on ? Math.min(PLANT_RADIUS, Math.ceil(this.cam.distance * 1.3), Math.floor(this.w / 2)) : 0;
     const full = tilePx >= PLANT_PX * 3;
+    const day = Math.floor(this.clock.day);
     const at = this.plantAt;
     if (!on && at.radius === 0 && !Number.isNaN(at.tx)) return;
     const near = Math.abs(this.cam.tx - at.tx) < radius / 4 && Math.abs(this.cam.ty - at.ty) < radius / 4;
-    if (near && radius <= at.radius && radius >= at.radius * 0.6 && full === at.full) return;
+    const sameDay = day === at.day || now - at.at < SEASON_MS;
+    if (near && sameDay && radius <= at.radius && radius >= at.radius * 0.6 && full === at.full) {
+      // A new day still waiting for its turn: come back for it.
+      if (day !== at.day && on) this.requestRender();
+      return;
+    }
     at.tx = this.cam.tx;
     at.ty = this.cam.ty;
     at.radius = radius;
     at.full = full;
+    at.day = day;
+    at.at = now;
     const counts = [0, 0, 0];
     if (on) {
       const { w, h } = this;
       const forage = this.forage!;
+      const snow = this.snow;
       // Far away, half the plants: they are small on screen and many.
       const keep = full ? 1 : 0.5;
       const m = new THREE.Matrix4();
@@ -944,11 +1008,17 @@ export class World3D {
           const f = forage[i];
           if (f < 0 || this.waterKind[i] !== 0) continue;
           const kinds = PLANTS[this.biome[i]] ?? PLANTS[0];
+          const white = snow ? Math.min(1, snow[i] ?? 0) : 0;
+          // Day of the year as the northern hemisphere sees it: the south's seasons are half a year apart.
+          const lat = this.latN - ((y + 0.5) / h) * (this.latN - this.latS);
+          const leafDay = lat >= 0 ? day : day + 182;
+          const deciduous = DECIDUOUS.has(this.biome[i]) && Math.abs(lat) > 23;
           for (let kind = 0; kind < 3; kind++) {
             const n = kinds[kind];
             if (!n) continue;
             // Grass grows with forage; trees keep at least half their number.
-            const share = kind === 2 ? f : 0.5 + 0.5 * f;
+            // Deep snow buries the grass.
+            const share = kind === 2 ? f * (1 - THREE.MathUtils.smoothstep(white, 0.3, 0.7)) : 0.5 + 0.5 * f;
             for (let j = 0; j < Math.ceil(n); j++) {
               const seed = (i * 16 + kind * 5 + j) | 0;
               if (hash01(seed) >= Math.min(1, n - j) * share * keep) continue;
@@ -960,8 +1030,13 @@ export class World3D {
               sc.set(big, kind === 2 ? 0.6 + 0.6 * f : big, big);
               p.set(px, this.heightAt(px, py) - 0.005, py);
               this.plants[kind].setMatrixAt(counts[kind], m.compose(p, q, sc));
+              const r = hash01(seed ^ 0x33);
               if (kind === 2) c.copy(DRY_GRASS).lerp(LUSH_GRASS, f);
-              else c.copy(kind === 0 ? CONIFER : BROADLEAF).multiplyScalar(0.85 + 0.3 * hash01(seed ^ 0x33));
+              else if (kind === 1 && deciduous) leafColor(leafDay, r, c);
+              else c.copy(kind === 0 ? CONIFER : BROADLEAF);
+              if (kind !== 2) c.multiplyScalar(0.85 + 0.3 * r);
+              // Snow settles on the branches (less on bare ones, which hold little).
+              c.lerp(SNOW, white * (kind === 2 ? 0.8 : 0.65));
               this.plants[kind].setColorAt(counts[kind]++, c);
             }
           }
@@ -1295,6 +1370,27 @@ export class World3D {
 
   // ---------------------------------------------------------------- drawing
 
+  /**
+   * Fit the sun's shadow camera to the ground around the camera target: a square about
+   * as wide as the view, so shadows stay sharp when zoomed in and cover the screen when
+   * zoomed out. The light sits up-sun of the target.
+   */
+  private placeShadows() {
+    const half = Math.min(Math.max(this.w, this.h) * 0.75, Math.max(4, this.cam.distance * 0.9));
+    const target = new THREE.Vector3(this.cam.tx, this.heightAt(this.cam.tx, this.cam.ty), this.cam.ty);
+    const reach = half * 2 + 20;
+    this.sun.target.position.copy(target);
+    this.sun.position.copy(target).addScaledVector(this.sunDir, reach);
+    const sc = this.sun.shadow.camera;
+    sc.left = sc.bottom = -half;
+    sc.right = sc.top = half;
+    sc.near = 1;
+    sc.far = reach * 2;
+    sc.updateProjectionMatrix();
+    // Offset along the normal by about a shadow-map texel, which grows as the area does.
+    this.sun.shadow.normalBias = ((2 * half) / SHADOW_MAP) * 1.5;
+  }
+
   resize() {
     const el = this.renderer.domElement;
     const cw = el.clientWidth;
@@ -1356,6 +1452,7 @@ export class World3D {
       this.simpleGeo.setAttribute("aShape", this.shapeAttr);
       this.animals = new THREE.InstancedMesh(this.animalGeo, this.animalMat, cap);
       this.animals.frustumCulled = false;
+      this.animals.receiveShadow = true;
       this.scene.add(this.animals);
     }
     const mesh = this.animals;
@@ -1405,8 +1502,9 @@ export class World3D {
     }
     this.updateCamera();
     this.applyLight();
+    this.placeShadows();
     const upp = this.unitsPerPixel();
-    this.layoutPlants(1 / upp);
+    this.layoutPlants(1 / upp, now);
     // Bodies are at least ~9 px long so a herd stays visible from far away.
     const size = Math.min(4, Math.max(0.12, 9 * upp));
     const detailed = size / upp >= DETAIL_PX;
@@ -1420,7 +1518,11 @@ export class World3D {
     } else if (moving) {
       this.layoutAnimals(this.lastSize, detailed, now);
     }
-    if (this.animals) this.animals.geometry = detailed ? this.animalGeo : this.simpleGeo;
+    if (this.animals) {
+      this.animals.geometry = detailed ? this.animalGeo : this.simpleGeo;
+      // Bodies are enlarged to stay visible when small on screen; only true-to-size ones cast shadows.
+      this.animals.castShadow = detailed;
+    }
     this.placeBox(this.focusBox, this.focusRect, true);
     const selRow = this.selectedId !== null ? this.rowOf(this.selectedId) : -1;
     const sel = selRow >= 0 ? drawnAt(d!, selRow, a) : this.selected ? [this.selected.x, this.selected.y] : null;

@@ -5,7 +5,7 @@
 | Document | Implementation plan |
 | Feature | A single 3D world that contains the whole simulation |
 | Date | 2026-10-19 |
-| Status | Phases 1–6 done |
+| Status | Phases 1–7 done |
 | Related | [3D World PRD](./3D_WORLD_PRD.md) · [3D World TRD](./3D_WORLD_TRD.md) · [3D World System Design](./3D_WORLD_SYSTEM_DESIGN.md) |
 
 ---
@@ -78,12 +78,19 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | 6.2 | The worker sends the `forage` layer about once a second. Conifers, broadleaf trees and grass tufts are instanced around the camera target (up to 70 tiles away) once a tile is 10 px across, with counts per tile by biome. Grass is drawn in proportion to forage and dries from green to straw; trees keep at least half their number. Half the plants are drawn until a tile is 30 px across. Plants show on the Terrain and Vegetation layers. | Grazing pressure is visible in the scene. |
 | 6.3 | The engine adds `days` (days since the start) to the status. The 3D view records the inspected animal's reported positions and draws them as a line over the last simulated day, fading with age and ending at the animal as drawn. A new selection clears it. | Where the animal has been is visible at a glance. |
 
+### Phase 7: Seasons on the plants, and shadows (done)
+
+| # | Task | Result |
+|---|---|---|
+| 7.1 | The snow cover (already sent once a day) is passed to the plants. Snow whitens tree crowns and buries grass (thinned from 30% cover, gone at 70%). Broadleaf trees in temperate grassland, forest and rainforest beyond the tropics follow the season of their hemisphere: green in summer, gold or red (per tree, a few days apart) from mid-September, bare from mid-November, light green as the leaves come out in April–May. The plants are laid out again when the day changes, at most four times a second. | The seasons show on the plants as well as on the ground. |
+| 7.2 | The sun casts PCF soft shadows (2,048² map). The shadow camera covers a square about as wide as the view around the camera target, so shadows are sharp close up and still cover the screen when zoomed out; the normal bias grows with the texel size. Terrain, trees and grass cast and receive shadows; animals cast them only when drawn at true size (bodies enlarged to stay visible do not). Shadows fade out with the light at dusk. | Low winter sun reads as such: long shadows behind trees and mountains. |
+
 ### Next (proposed)
 
 | # | Task | Why |
 |---|---|---|
-| 7.1 | Snow on plants in winter, and leaves turning in autumn in temperate forests. | Show the seasons on the plants too. |
-| 7.2 | Shadows from the sun on the terrain. | Make the low winter sun read as such. |
+| 8.1 | Bend the shadows of animals with the same shader as their bodies (legs, ornament). | Shadows match the drawn shape exactly. |
+| 8.2 | Wind in the grass and tree crowns. | The scene feels alive when time is paused. |
 
 ## Testing
 
@@ -98,4 +105,5 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | No WebGL (old hardware, locked-down browsers) | Automatic fallback to the flat map with a notice. |
 | Large worlds with many herds drop frames | Instancing, mesh reuse, layout only when data or zoom changes (or while animals move); sprites above 20,000 figures (5.5). |
 | Plants add many triangles | Low-poly plants (12–28 triangles), only near the camera target and only when zoomed in, half as many until tiles are large, at most 80,000 of each kind. |
+| Shadows draw the scene twice | One 2,048² map fitted to the view; sprites and herds cast none. |
 | 3D picking is less precise than the flat map | Pick radius scales with zoom; zooming in makes selection exact. |
