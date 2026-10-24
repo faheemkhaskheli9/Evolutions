@@ -228,3 +228,13 @@ export type FromWorker =
   | { type: "replayScript"; text: string }
   | { type: "notice"; message: string }
   | { type: "error"; message: string };
+
+/**
+ * What the UI does with an `inspect` reply, given the animal inspected now: replies for an
+ * earlier animal, or from a world since replaced, are stale; `null` data means the animal
+ * died or left the simulated area.
+ */
+export function inspectReply(inspected: number | null, m: { id: number; data: Record<string, unknown> | null }): "stale" | "update" | "gone" {
+  if (m.id !== inspected) return "stale";
+  return m.data ? "update" : "gone";
+}

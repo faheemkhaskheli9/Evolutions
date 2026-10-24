@@ -18,7 +18,7 @@ interface Props {
 }
 
 /** Round tick values (1, 2 or 5 × 10ⁿ apart) covering [min, max], about `count` of them. */
-function niceTicks(min: number, max: number, count = 3): number[] {
+export function niceTicks(min: number, max: number, count = 3): number[] {
   const raw = (max - min) / Math.max(1, count - 1);
   if (!(raw > 0) || !isFinite(raw)) return [min];
   const mag = 10 ** Math.floor(Math.log10(raw));
@@ -28,6 +28,43 @@ function niceTicks(min: number, max: number, count = 3): number[] {
   return ticks;
 }
 
+/**
+ * Axis ranges covering every point and band, in plotted units (log10 of the value on a log
+ * scale), with a margin above and below. A single x or y value still gets a non-empty range.
+ */
+export function chartRange(series: Series[], log: boolean) {
+  const tf = (v: number) => (log ? Math.log10(Math.max(1, v)) : v);
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+  for (const s of series) {
+    s.points.forEach(([x, y], i) => {
+      const b = s.band?.[i] ?? 0;
+      xmin = Math.min(xmin, x);
+      xmax = Math.max(xmax, x);
+      ymin = Math.min(ymin, tf(y - b));
+      ymax = Math.max(ymax, tf(y + b));
+    });
+  }
+  if (!isFinite(xmin)) return { xmin: 0, xmax: 1, ymin: 0, ymax: 1 };
+  if (xmax === xmin) xmax = xmin + 1;
+  if (ymax === ymin) {
+    ymax += Math.abs(ymax) * 0.05 + 1e-3;
+    ymin -= Math.abs(ymin) * 0.05 + 1e-3;
+  }
+  const m = (ymax - ymin) * 0.06;
+  return { xmin, xmax, ymin: log ? ymin : ymin - m, ymax: ymax + m };
+}
+
+/** y ticks in plotted units; on a log scale, whole powers of ten when at least two fit. */
+export function yAxisTicks(ymin: number, ymax: number, log: boolean): number[] {
+  const decades = log ? niceTicks(ymin, ymax, 4).filter((t) => Number.isInteger(t)) : [];
+  return decades.length >= 2 ? decades : log ? [0, 0.5, 1].map((f) => ymin + f * (ymax - ymin)) : niceTicks(ymin, ymax, 4);
+}
+
+/** An x tick's label: whole years once the axis spans ten or more. */
+export function xTickLabel(t: number, span: number): string {
+  return span >= 10 ? Math.round(t).toLocaleString() : fmt(t, span < 1 ? 2 : 1);
+}
+
 /** Small dependency-free SVG line chart with axes and a hover read-out. */
 export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log = false }: Props) {
   const width = 340;
@@ -35,33 +72,11 @@ export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log =
   const [hover, setHover] = useState<number | null>(null);
   const tf = (v: number) => (log ? Math.log10(Math.max(1, v)) : v);
 
-  const { xmin, xmax, ymin, ymax } = useMemo(() => {
-    let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
-    for (const s of series) {
-      s.points.forEach(([x, y], i) => {
-        const b = s.band?.[i] ?? 0;
-        xmin = Math.min(xmin, x);
-        xmax = Math.max(xmax, x);
-        ymin = Math.min(ymin, tf(y - b));
-        ymax = Math.max(ymax, tf(y + b));
-      });
-    }
-    if (!isFinite(xmin)) return { xmin: 0, xmax: 1, ymin: 0, ymax: 1 };
-    if (xmax === xmin) xmax = xmin + 1;
-    if (ymax === ymin) {
-      ymax += Math.abs(ymax) * 0.05 + 1e-3;
-      ymin -= Math.abs(ymin) * 0.05 + 1e-3;
-    }
-    const m = (ymax - ymin) * 0.06;
-    return { xmin, xmax, ymin: log ? ymin : ymin - m, ymax: ymax + m };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, log]);
+  const { xmin, xmax, ymin, ymax } = useMemo(() => chartRange(series, log), [series, log]);
 
   const sx = (x: number) => pad.l + ((x - xmin) / (xmax - xmin)) * (width - pad.l - pad.r);
   const sy = (y: number) => pad.t + (1 - (tf(y) - ymin) / (ymax - ymin)) * (height - pad.t - pad.b);
-  // y ticks in transformed units; on a log scale prefer whole powers of ten.
-  const decades = log ? niceTicks(ymin, ymax, 4).filter((t) => Number.isInteger(t)) : [];
-  const yTicks = decades.length >= 2 ? decades : log ? [0, 0.5, 1].map((f) => ymin + f * (ymax - ymin)) : niceTicks(ymin, ymax, 4);
+  const yTicks = yAxisTicks(ymin, ymax, log);
   const xTicks = niceTicks(xmin, xmax, 4);
   const syT = (t: number) => pad.t + (1 - (t - ymin) / (ymax - ymin)) * (height - pad.t - pad.b);
 
@@ -91,7 +106,7 @@ export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log =
         ))}
         {xTicks.map((t, i) => (
           <text key={i} x={sx(t)} y={height - 8} textAnchor={sx(t) < pad.l + 12 ? "start" : sx(t) > width - pad.r - 12 ? "end" : "middle"} className="tick">
-            {xmax - xmin >= 10 ? Math.round(t).toLocaleString() : fmt(t, xmax - xmin < 1 ? 2 : 1)}
+            {xTickLabel(t, xmax - xmin)}
           </text>
         ))}
         {series.map((s) => (

@@ -46,6 +46,17 @@ export function describeSpeed(simSecondsPerSecond: number): string {
   return `${(s / (365.25 * 86400)).toFixed(1)} years/s`;
 }
 
+/**
+ * Achieved speed after a frame of `dt` seconds: the requested speed less the backlog
+ * dropped (sim-minutes), smoothed over about a second. Steps of a whole year land on only
+ * some frames, so a per-frame count of simulated time would flicker between zero and a spike.
+ */
+export function smoothSpeed(achieved: number, requested: number, droppedMinutes: number, dt: number): number {
+  if (!(dt > 0)) return achieved;
+  const now = Math.max(0, requested - (droppedMinutes * 60) / dt);
+  return achieved + (now - achieved) * Math.min(1, dt);
+}
+
 // Biome colours, indexed like the engine's Biome enum.
 export const BIOME_COLORS: RGB[] = [
   [28, 63, 112], // ocean

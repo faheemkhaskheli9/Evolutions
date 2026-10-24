@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
 import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
+import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
 import { PhyloTree } from "./components/PhyloTree";
@@ -145,16 +146,17 @@ export default function App() {
         case "jumpDone":
           setProgress(null);
           break;
-        case "inspect":
+        case "inspect": {
           // Ignore replies for an animal no longer inspected (or from a replaced world).
-          if (m.id !== inspectRef.current) break;
-          if (m.data) setInspectData(m.data);
-          else {
+          const reply = inspectReply(inspectRef.current, m);
+          if (reply === "update") setInspectData(m.data);
+          else if (reply === "gone") {
             // It died, or left the simulated area: keep its last state and stop polling.
             setInspectId(null);
             setInspectData((d) => (d ? { ...d, gone: true } : null));
           }
           break;
+        }
         case "picked":
           if (m.id >= 0) {
             inspectRef.current = m.id;

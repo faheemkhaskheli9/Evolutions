@@ -3,8 +3,9 @@
 // to the UI (System Design §5 and §7).
 
 import init, { Engine, ReplayRun } from "../wasm/evo_wasm.js";
-import { readAutosave, writeAutosave } from "./autosave";
+import { Autosaver, readAutosave, writeAutosave } from "./autosave";
 import type { FrameMsg, FromWorker, ModeChoice, SimEvent, SpeciesInfo, StopCondition, ToWorker } from "./protocol";
+import { smoothSpeed } from "../util";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -32,10 +33,12 @@ let precip: Float32Array | null = null;
 let densityOn = false;
 let densitySpecies: number | null = null;
 let lastAutosave = 0;
-/** The world changed since the last autosave (time ran, an intervention, a new world). */
-let dirty = false;
-let autosaving = false;
-let autosavePending = false;
+const autosaver = new Autosaver(writeAutosave, () => {
+  if (!engine) return null;
+  const info = JSON.parse(engine.world_info());
+  const year = engine.year();
+  return { info: { template: info.template, seed: info.seed, year, savedAt: Date.now() }, bytes: engine.save().buffer as ArrayBuffer };
+});
 
 /** Above this speed the engine uses Population mode in Auto (sim-seconds per second). */
 const POPULATION_SPEED = 30 * 86400;
@@ -66,27 +69,7 @@ function replaceEngine(next: Engine) {
 /** Keeps the latest world in IndexedDB so a closed tab can resume (PRD FR-P1). */
 function autosave() {
   lastAutosave = performance.now();
-  if (!engine || !dirty) return;
-  if (autosaving) {
-    // Save again once the write in progress finishes, so a new world is not skipped.
-    autosavePending = true;
-    return;
-  }
-  const info = JSON.parse(engine.world_info());
-  const year = engine.year();
-  const bytes = engine.save();
-  dirty = false;
-  autosaving = true;
-  writeAutosave({ template: info.template, seed: info.seed, year, savedAt: Date.now() }, bytes.buffer as ArrayBuffer)
-    // Storage can be unavailable (private windows, quota); autosave is best-effort.
-    .catch(() => {})
-    .finally(() => {
-      autosaving = false;
-      if (autosavePending) {
-        autosavePending = false;
-        autosave();
-      }
-    });
+  autosaver.save();
 }
 
 function sendCreated() {
@@ -111,7 +94,7 @@ function sendCreated() {
     modeChoice = modeBeforeFocus;
     modeBeforeFocus = null;
   }
-  dirty = true;
+  autosaver.dirty = true;
   sendFrame(true);
   autosave();
 }
@@ -233,7 +216,7 @@ function loop() {
         carryMinutes -= stepMin;
         ran += stepMin;
       }
-      if (ran > 0) dirty = true;
+      if (ran > 0) autosaver.dirty = true;
       let dropped = 0;
       if (carryMinutes > stepMin * 2) {
         // Falling behind: drop the backlog; in Auto mode, give up on Individual mode.
@@ -250,13 +233,7 @@ function loop() {
       } else {
         slowSince = 0;
       }
-      // Achieved speed: the requested speed less any backlog dropped, smoothed over about a
-      // second. (Steps of a whole year land on only some frames, so a per-frame count of
-      // simulated time would flicker between zero and a spike.)
-      if (dt > 0) {
-        const now = Math.max(0, speed - (dropped * 60) / dt);
-        achieved += (now - achieved) * Math.min(1, dt / 1);
-      }
+      achieved = smoothSpeed(achieved, speed, dropped, dt);
       restoreMode();
       if (engine.population() === 0) {
         playing = false;
@@ -314,7 +291,7 @@ async function jump(years: number, until?: StopCondition) {
     const seen = { events: JSON.parse(engine.status()).events as number };
     // A condition that already holds would stop at once; only react to it becoming true.
     const armed = !until || until.kind === "speciation" || until.kind === "extinction" || conditionMet(engine, until, { events: 0 }) === null;
-    dirty = true;
+    autosaver.dirty = true;
     while (engine.year() < target && !cancelJump && !reason) {
       const t0 = performance.now();
       while (engine.year() < target && performance.now() - t0 < 40) {
@@ -454,7 +431,7 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "apply":
         engine?.apply(JSON.stringify(m.intervention));
-        dirty = true;
+        autosaver.dirty = true;
         sendFrame(true);
         break;
       case "pick":
