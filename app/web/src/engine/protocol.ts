@@ -1,5 +1,7 @@
 // Messages between the UI thread and the engine worker (System Design §7).
 
+import type { CheckpointInfo } from "./checkpoints";
+
 export type ModeChoice = "Auto" | "Individual" | "Population";
 
 export interface FounderGroup {
@@ -110,6 +112,8 @@ export interface SimEvent {
   kind: "Info" | "Founders" | "Speciation" | "Extinction" | "Mode" | "Intervention" | "Crash" | "Adaptation";
   species: number | null;
   text: string;
+  /** Position in the world's chronicle (added by the worker). */
+  index?: number;
 }
 
 export interface Sample {
@@ -221,7 +225,13 @@ export type ToWorker =
   /** The current world's replay log as a JSON script (PRD FR-P2). */
   | { type: "exportReplay" }
   /** Replays a JSON script, or the current world from its start when `script` is absent. */
-  | { type: "replay"; script?: string };
+  | { type: "replay"; script?: string }
+  /** Restores a checkpoint, discarding the history after it (PRD FR-T6). */
+  | { type: "rewind"; id: number }
+  /** Restores the latest checkpoint taken before chronicle event `event`. */
+  | { type: "rewindBefore"; event: number }
+  /** The state hash, to check that a rewound run repeats the original. */
+  | { type: "hash" };
 
 export interface FrameMsg {
   type: "frame";
@@ -263,6 +273,9 @@ export type FromWorker =
   | { type: "newick"; text: string }
   | { type: "exportedData"; files: ExportFile[] }
   | { type: "replayScript"; text: string }
+  /** The checkpoints kept for rewind, oldest first, and their total size in bytes. */
+  | { type: "checkpoints"; list: CheckpointInfo[]; bytes: number; budget: number }
+  | { type: "hash"; year: number; hash: string }
   | { type: "notice"; message: string }
   | { type: "error"; message: string };
 

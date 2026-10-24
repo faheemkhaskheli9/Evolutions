@@ -105,7 +105,7 @@ Click **Create world** to generate the terrain, climate, rivers and biomes and r
   - The **3D world / Flat map** switch in the top-right corner changes to a flat top-down map. The app remembers your choice. Browsers without 3D graphics (WebGL) get the flat map automatically.
   - The legend in the bottom-left corner names the species colours.
 - **Side panel:** the **Species**, **Tree**, **Chronicle**, **Inspector** and **World** tabs.
-- **Time bar:** play/pause, speed presets, the achieved speed, **Jump ahead** buttons and **Run until…**.
+- **Time bar:** play/pause, speed presets, the achieved speed, **Jump ahead** buttons and **Run until…**, with the **Rewind** strip of checkpoints underneath.
 
 ---
 
@@ -148,6 +148,18 @@ If the animal dies (or, while you watch a region, walks out of it), the Inspecto
 During a jump, a progress card shows the year reached. **Stop here** ends the jump at the current year. Play, pause and the jump buttons are disabled until the jump ends. If every organism dies during a jump, it stops and says so.
 
 ![Fast-forwarding: progress card with a Stop here button](guide/08-jump-progress.png)
+
+### Rewind
+
+The app keeps checkpoints of the world as it runs, so you can go back to an earlier point, watch a population crash again, or try a different intervention, without starting over.
+
+The **Rewind** strip under the time bar runs from the start of the world (left) to now (the white line on the right). Each mark is a checkpoint; hover it to see its year. Click a mark to rewind to it.
+
+- Checkpoints are taken when the world is created or opened, every 10 simulated years (at most about one a second while fast-forwarding, and at least every 30 seconds while time runs slowly), just before each jump (green marks) and just before each intervention (yellow marks).
+- They are compressed and kept in memory, up to 200 MB. When that fills up, older checkpoints are thinned out: the recent past keeps many, the distant past fewer. The number of checkpoints and the memory they use are shown on the right.
+- **Rewinding discards what happened after the checkpoint**, including later checkpoints. Running forward again from the same checkpoint, with the same actions, gives exactly the same world as the first time.
+- In the **Chronicle**, the **⟲** button on an entry rewinds to the latest checkpoint before that event (for example, just before a climate shift you applied).
+- Checkpoints last for this session only. To keep a point in time, use **Save**.
 
 ---
 
@@ -216,6 +228,8 @@ It records:
 - **World events:** founders released, mode switches, interventions, and climate recovering after an impact winter.
 
 Use the filter chips (**All**, **New species**, **Extinctions**, **Adaptations**, **World**) to focus on one kind of event.
+
+The **⟲** button at the end of an entry goes back to just before that event (see [Rewind](#rewind)).
 
 ---
 
@@ -356,6 +370,7 @@ When the replay ends, a message says whether the world is identical to the origi
 
 ## 15. Tips for good experiments
 
+- **Try again from the same moment:** rewind to just before an event (the **⟲** in the Chronicle) and do something different, such as a smaller meteor or no epidemic.
 - **Compare like with like:** use the same seed and change one thing, such as the climate, a founder count or mutation rates. Then compare the Species charts.
 - **See natural selection:** the **Ice Age Eurasia** template with 1,000–5,000 years of jumps shows insulation rising. The **Desert & Oasis** template shows kidneys and heat tolerance improving.
 - **See a bottleneck:** strike a species with a 90% epidemic, then watch its neutral genetic diversity in the Species tab.

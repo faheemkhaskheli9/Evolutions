@@ -4,6 +4,7 @@
 
 import init, { Engine, ReplayRun } from "../wasm/evo_wasm.js";
 import { Autosaver, readAutosave, writeAutosave } from "./autosave";
+import { CheckpointStore, compress, decompress, type CheckpointReason } from "./checkpoints";
 import { exportFiles, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
 import { smoothSpeed } from "../util";
 
@@ -44,6 +45,21 @@ const autosaver = new Autosaver(writeAutosave, () => {
 const POPULATION_SPEED = 30 * 86400;
 const AUTOSAVE_MS = 60_000;
 
+/** Checkpoints for rewind (PRD FR-T6). */
+const checkpoints = new CheckpointStore();
+/** Bumped when the history is replaced, so a checkpoint still compressing is dropped. */
+let cpGeneration = 0;
+let cpInFlight = 0;
+let lastCpYear = 0;
+let lastCpReal = 0;
+let rewinding = false;
+/** A checkpoint every this many simulated years… */
+const CHECKPOINT_YEARS = 10;
+/** …or, while time moves slowly (Individual mode), every this many milliseconds… */
+const CHECKPOINT_IDLE_MS = 30_000;
+/** …but at most one per this many milliseconds, so fast-forwarding stays fast. */
+const CHECKPOINT_MIN_MS = 1_000;
+
 function post(msg: FromWorker, transfer: Transferable[] = []) {
   ctx.postMessage(msg, transfer);
 }
@@ -72,7 +88,73 @@ function autosave() {
   autosaver.save();
 }
 
-function sendCreated() {
+function postCheckpoints() {
+  post({ type: "checkpoints", list: checkpoints.infos(), bytes: checkpoints.total, budget: checkpoints.budget });
+}
+
+/** Keeps the current state as a checkpoint; it is compressed in the background. */
+function checkpoint(reason: CheckpointReason) {
+  if (!engine) return;
+  const year = engine.year();
+  const events = JSON.parse(engine.status()).events as number;
+  const bytes = engine.save();
+  const generation = cpGeneration;
+  lastCpYear = year;
+  lastCpReal = performance.now();
+  cpInFlight++;
+  compress(bytes)
+    .then((packed) => {
+      if (generation !== cpGeneration) return;
+      checkpoints.add(year, events, reason, packed);
+      postCheckpoints();
+    })
+    .catch(fail)
+    .finally(() => cpInFlight--);
+}
+
+function maybeCheckpoint() {
+  if (!engine || cpInFlight > 0) return;
+  const elapsed = performance.now() - lastCpReal;
+  const years = engine.year() - lastCpYear;
+  if (elapsed >= CHECKPOINT_MIN_MS && (years >= CHECKPOINT_YEARS || (elapsed >= CHECKPOINT_IDLE_MS && years > 0))) checkpoint("periodic");
+}
+
+/** Starts a new history: the checkpoints of the previous world no longer apply. */
+function resetCheckpoints() {
+  cpGeneration++;
+  checkpoints.clear();
+  checkpoint("start");
+  postCheckpoints();
+}
+
+/**
+ * Restores checkpoint `id` and discards the history after it. The world the UI shows is
+ * replaced as if it were opened from a file.
+ */
+async function rewind(id: number) {
+  const cp = checkpoints.get(id);
+  if (!cp || jumping || rewinding) return;
+  rewinding = true;
+  playing = false;
+  try {
+    const next = Engine.load(await decompress(cp.bytes));
+    cpGeneration++;
+    checkpoints.truncateAfter(id);
+    replaceEngine(next);
+    lastCpYear = cp.year;
+    lastCpReal = performance.now();
+    sendCreated(false);
+    postCheckpoints();
+    post({ type: "notice", message: `Rewound to year ${Math.floor(cp.year).toLocaleString()}; what happened after it was discarded.` });
+  } catch (e) {
+    fail(e);
+  } finally {
+    rewinding = false;
+  }
+}
+
+/** `fresh`: a new history (a new, opened or replayed world) rather than a rewind. */
+function sendCreated(fresh = true) {
   if (!engine) return;
   post(
     {
@@ -97,12 +179,13 @@ function sendCreated() {
   autosaver.dirty = true;
   sendFrame(true);
   autosave();
+  if (fresh) resetCheckpoints();
 }
 
 function sendFrame(full = false) {
   if (!engine) return;
   const status = JSON.parse(engine.status());
-  const events = JSON.parse(engine.events(eventsSent));
+  const events = (JSON.parse(engine.events(eventsSent)) as SimEvent[]).map((e, k) => ({ ...e, index: eventsSent + k }));
   eventsSent += events.length;
   const msg: FrameMsg = {
     type: "frame",
@@ -204,7 +287,7 @@ function loop() {
   const now = performance.now();
   const dt = Math.min(0.1, (now - lastTick) / 1000);
   lastTick = now;
-  if (engine && playing && !jumping) {
+  if (engine && playing && !jumping && !rewinding) {
     try {
       autoMode();
       carryMinutes += (speed * dt) / 60;
@@ -216,7 +299,10 @@ function loop() {
         carryMinutes -= stepMin;
         ran += stepMin;
       }
-      if (ran > 0) autosaver.dirty = true;
+      if (ran > 0) {
+        autosaver.dirty = true;
+        maybeCheckpoint();
+      }
       let dropped = 0;
       if (carryMinutes > stepMin * 2) {
         // Falling behind: drop the backlog; in Auto mode, give up on Individual mode.
@@ -285,6 +371,8 @@ async function jump(years: number, until?: StopCondition) {
   playing = false;
   let reason: string | null = null;
   try {
+    // Before the mode switch, so a rewind here repeats the jump exactly.
+    checkpoint("jump");
     if (engine.mode() === "Individual" && years > 2) engine.set_mode("Population");
     const startYear = engine.year();
     const target = startYear + years;
@@ -299,6 +387,7 @@ async function jump(years: number, until?: StopCondition) {
         if (until && armed && (reason = conditionMet(engine, until, seen))) break;
       }
       post({ type: "progress", done: engine.year() - startYear, total: years, label: `Year ${Math.floor(engine.year()).toLocaleString()}` });
+      maybeCheckpoint();
       sendFrame();
       await new Promise((r) => setTimeout(r, 0));
       if (engine.population() === 0) break;
@@ -430,7 +519,9 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         cancelJump = true;
         break;
       case "apply":
-        engine?.apply(JSON.stringify(m.intervention));
+        if (!engine) break;
+        checkpoint("intervention");
+        engine.apply(JSON.stringify(m.intervention));
         autosaver.dirty = true;
         sendFrame(true);
         break;
@@ -476,6 +567,18 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "exportReplay":
         if (engine) post({ type: "replayScript", text: engine.replay_script() });
+        break;
+      case "rewind":
+        void rewind(m.id);
+        break;
+      case "rewindBefore": {
+        const cp = checkpoints.before(m.event);
+        if (cp) void rewind(cp.id);
+        else post({ type: "notice", message: "No checkpoint from before that event is kept." });
+        break;
+      }
+      case "hash":
+        if (engine) post({ type: "hash", year: engine.year(), hash: engine.state_hash() });
         break;
       case "replay":
         if (jumping) break;

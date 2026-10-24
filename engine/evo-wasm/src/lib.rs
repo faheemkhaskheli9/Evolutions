@@ -85,6 +85,11 @@ impl Engine {
     }
 
     /// The world's replay script (creation settings and every action) as JSON (PRD FR-P2).
+    /// Deterministic hash of the state, in hex (TRD TR-D7); equal hashes mean equal worlds.
+    pub fn state_hash(&self) -> String {
+        format!("{:016x}", self.sim.state_hash())
+    }
+
     pub fn replay_script(&self) -> Result<String, JsError> {
         let script = self.sim.replay_script().map_err(err)?;
         serde_json::to_string_pretty(&script).map_err(err)

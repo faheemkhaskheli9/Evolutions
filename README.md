@@ -59,6 +59,7 @@ In the app:
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
 - **Jump ahead** (+100 to +100k years) fast-forwards in Population mode.
+- The **Rewind** strip under the time bar holds checkpoints (every 10 simulated years, and before each jump and intervention, up to 200 MB): click one to go back to it. The Chronicle's **⟲** goes back to just before an event.
 - **Run until…** fast-forwards until a new species arises, a species goes extinct, or a population or trait crosses a threshold.
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
 - The **World** tab has map layers and interventions (climate shift, meteor, introduced species, epidemic).
@@ -89,7 +90,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | Ecology | Grazing and plant regrowth, predation (analytic chases in Individual mode; ratio-dependent type III response with satiation, prey refuges and scavenging in Population mode), competition, carrion |
 | Evolution at scale (Population mode) | Age- and sex-structured demes per 8×8-tile patch; selection gradients from the same physiology functions; Wright–Fisher drift; mutation; migration along land borders, plus rare rafting |
 | Species | Automatic detection by reproductive compatibility (biological species concept), with hysteresis; allopatric vs parapatric/sympatric cause; generated binomial names; phylogeny with Newick export |
-| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps), switched automatically by speed; focus regions; deterministic replay; save/load |
+| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps), switched automatically by speed; focus regions; rewind to in-session checkpoints; deterministic replay; save/load |
 
 ## Validation
 
@@ -103,7 +104,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | V-G4 Kimura | A beneficial allele fixes with probability (1 − e^−2s)/(1 − e^−4Ns) |
 | V-G5 Breeder's equation | Response to truncation selection ≈ h²·S |
 | V-G6 Haldane | Recombination fraction matches Haldane's map function |
-| Determinism, save/load | Same seed gives the same history; a reloaded world continues identically |
+| Determinism, save/load, rewind | Same seed gives the same history; a reloaded world, or one rewound to a checkpoint, continues identically |
 | V-P1 Transitions | Individual ↔ Population switches conserve abundance, mean genetic values and diversity |
 
 `cargo test --release -- --ignored` also runs the long ecological tests:

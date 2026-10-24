@@ -10,7 +10,18 @@ const FILTERS: { key: string; label: string; kinds: SimEvent["kind"][] }[] = [
   { key: "world", label: "World", kinds: ["Intervention", "Founders", "Mode", "Info"] },
 ];
 
-export function EventsPanel({ events, species, onSelectSpecies }: { events: SimEvent[]; species: SpeciesInfo[]; onSelectSpecies: (id: number) => void }) {
+export function EventsPanel({
+  events,
+  species,
+  onSelectSpecies,
+  onRewindBefore,
+}: {
+  events: SimEvent[];
+  species: SpeciesInfo[];
+  onSelectSpecies: (id: number) => void;
+  /** Rewinds to just before an event (PRD FR-T6); absent while that is not possible. */
+  onRewindBefore?: (index: number) => void;
+}) {
   const [filter, setFilter] = useState("all");
   const f = FILTERS.find((x) => x.key === filter)!;
   const shown = events.filter((e) => f.kinds.length === 0 || f.kinds.includes(e.kind)).slice(-400).reverse();
@@ -28,6 +39,7 @@ export function EventsPanel({ events, species, onSelectSpecies }: { events: SimE
       <ol className="events">
         {shown.map((e, i) => {
           const sp = e.species !== null ? species.find((s) => s.id === e.species) : undefined;
+          const index = e.index ?? -1;
           return (
             <li key={`${e.year}-${i}`} className={`ev ev-${e.kind.toLowerCase()}`}>
               <span className="ev-year">yr {e.year < 10 ? e.year.toFixed(2) : Math.floor(e.year).toLocaleString()}</span>
@@ -39,6 +51,11 @@ export function EventsPanel({ events, species, onSelectSpecies }: { events: SimE
                 )}
                 {e.text}
               </span>
+              {onRewindBefore && e.index !== undefined && (
+                <button className="link ev-rewind" onClick={() => onRewindBefore(index)} title="Rewind to the latest checkpoint before this event" aria-label={`Go to just before: ${e.text}`}>
+                  ⟲
+                </button>
+              )}
             </li>
           );
         })}
