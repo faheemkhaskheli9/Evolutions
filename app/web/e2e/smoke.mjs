@@ -97,6 +97,15 @@ try {
     await select.selectOption(id);
     await page.waitForTimeout(500);
   });
+  await step("allele frequency layer", async () => {
+    await page.getByRole("button", { name: "Allele frequency" }).click();
+    const allele = page.getByLabel("Allele", { exact: true });
+    await allele.waitFor({ timeout: 10000 });
+    const n = await allele.locator("option").count();
+    if (n < 1) throw new Error("no alleles listed");
+    await allele.selectOption({ index: Math.min(1, n - 1) });
+    await page.waitForTimeout(800);
+  });
   await step("run until a threshold", async () => {
     await page.getByRole("button", { name: "Run until…" }).click();
     await page.getByLabel("Stop condition").selectOption("population");

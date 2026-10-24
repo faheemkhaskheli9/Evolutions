@@ -230,6 +230,7 @@ In the **World** tab, **Map layer** switches what the map shows:
 | **Rainfall** | Annual precipitation from brown (dry) to teal (wet). Look for rain shadows behind mountain ranges. |
 | **Vegetation** | How much forage is left compared with what the land can grow. Grazing pressure shows up as browner areas. |
 | **Population density** | Organisms per tile on a heat scale, for **all species** or one species picked in **Density of**. In the 3D world each occupied tile becomes a column: the taller and brighter, the denser. |
+| **Allele frequency** | How common one allele (gene variant) of a species is in each patch, from dark purple (absent) to yellow (every gene copy). Pick the **Species** and then the **Allele**: the list shows the species' variable alleles (between 1% and 99% of gene copies), trait genes first, each with its effect on the trait (on the genetic scale), whether the founders carried it or it arose as a mutation (and in which year), and its share in the whole species. Watch a new mutation spread out from where it arose, or a cline form along a climate gradient. |
 
 In the 3D world the chosen layer is draped over the relief, so you can see, for example, the cold along a mountain spine or the dry side of a range.
 

@@ -37,10 +37,10 @@ This plan comes from an audit of the engine and app against the PRD and TRD. Ite
 | **FR-W1** world-generator settings | **Done.** "Customise world settings" in the new-world dialog sets size, land shape, land fraction, roughness, temperature, rainfall, axial tilt and latitude range, starting from the chosen template. The catalog now includes each template's settings. The engine rejects invalid settings (inverted or out-of-range latitudes, land fraction outside 0–1, non-finite values); see `custom_world_settings_apply_and_are_validated`. |
 | **FR-T3** run until | **Done.** **Run until…** in the time bar fast-forwards until a speciation, an extinction, a population (all life or one species) or a species' mean trait crosses a threshold, within a year limit. A condition that already holds runs the full length and says so, instead of stopping at once. |
 | **FR-P1** autosave | **Done.** The worker saves the world to IndexedDB after creating or loading it, after every fast-forward, and once a minute while it changes. At startup the new-world dialog offers **Resume**. Autosave is best-effort: storage errors are ignored. |
-| **FR-O1** per-species map layers | **Density done.** The Population density layer has a species selector. This also fixes the layer showing an empty map in Individual mode, because the worker sent density only in Population mode or during a focus. **Next:** allele-frequency layers. |
+| **FR-O1** per-species map layers | **Done.** The Population density layer has a species selector. This also fixes the layer showing an empty map in Individual mode, because the worker sent density only in Population mode or during a focus. The **Allele frequency** layer shows one allele's frequency per patch (animals and demes pooled; -1 where the species is absent). Its picker lists the species' polymorphic alleles (1–99%), trait loci first, by expected heterozygosity, with their effects, origin and overall frequency. Alleles are named by their permanent `uid`, so a choice survives allele-table compaction and mode switches (`allele_frequency_layer_tracks_alleles_across_modes`). |
 | **FR-P2** replay log | **Next.** Record interventions and mode switches with their timestamps, so a run from the same seed replays identically in the browser. |
 
-The e2e smoke test (`app/web/e2e/smoke.mjs`) covers custom settings, a single-species density layer, **Run until**, and resuming the autosave after a reload.
+The e2e smoke test (`app/web/e2e/smoke.mjs`) covers custom settings, a single-species density layer, the allele-frequency layer, **Run until**, and resuming the autosave after a reload.
 
 ## Phase 5: Second audit (done)
 
@@ -78,6 +78,7 @@ The user guide is updated to match (speed presets, mode overrides, regions acros
 
 ### Next
 
-- Replay log (FR-P2) and allele-frequency map layers (FR-O1), as listed in Phase 4.
+- Replay log (FR-P2), as listed in Phase 4.
+- **Done:** allele-frequency map layer (FR-O1).
 - Old `.evo` files from before the `uid` fields were added do not load: bincode ignores `#[serde(default)]`. Bump `MODEL_VERSION` with the next format change and add a migration.
-- `EngineClient` has no `terminate()`, so React StrictMode in development starts a second worker.
+- **Done:** `EngineClient` starts its worker on first use and has `terminate()`, which the app calls when it unmounts, so React StrictMode in development no longer leaves a second worker running.

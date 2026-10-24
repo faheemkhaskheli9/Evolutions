@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
-import type { AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
 import { PhyloTree } from "./components/PhyloTree";
@@ -55,6 +55,11 @@ export default function App() {
   const [layer, setLayer] = useState<Layer>("terrain");
   const [layerData, setLayerData] = useState<Float32Array | null>(null);
   const [densitySpecies, setDensitySpecies] = useState<number | null>(null);
+  const [alleleSpecies, setAlleleSpecies] = useState<number | null>(null);
+  const [alleleUid, setAlleleUid] = useState<number | null>(null);
+  const [alleles, setAlleles] = useState<{ species: number; list: AlleleInfo[] } | null>(null);
+  /** The layer last requested, so a late reply for another layer is not drawn. */
+  const layerKind = useRef<string | null>(null);
   const [tool, setTool] = useState<Tool>("inspect");
   const [view, setView] = useState<View>(savedView);
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
@@ -76,7 +81,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    return client.on((m: FromWorker) => {
+    const off = client.on((m: FromWorker) => {
       switch (m.type) {
         case "ready":
           setCatalog(m.catalog);
@@ -94,6 +99,9 @@ export default function App() {
           setBusy(false);
           setLayerData(null);
           setDensitySpecies(null);
+          setAlleleSpecies(null);
+          setAlleleUid(null);
+          setAlleles(null);
           break;
         case "frame": {
           const f = frame.current;
@@ -159,7 +167,10 @@ export default function App() {
           setDetail({ id: m.id, traits: m.traits, metrics: m.metrics });
           break;
         case "layer":
-          setLayerData(m.data);
+          if (m.kind === layerKind.current) setLayerData(m.data);
+          break;
+        case "alleles":
+          setAlleles({ species: m.species, list: m.list });
           break;
         case "saved":
           downloadBlob(m.bytes, `evolutions-${Date.now()}.evo`);
@@ -177,6 +188,10 @@ export default function App() {
           break;
       }
     });
+    return () => {
+      off();
+      client.terminate();
+    };
   }, [client, notify]);
 
   // Keep the inspector and species detail fresh while time runs.
@@ -192,16 +207,45 @@ export default function App() {
     return () => clearInterval(t);
   }, [selectedSpecies, client]);
   useEffect(() => {
-    if (!world || layer === "terrain" || layer === "population") {
-      setLayerData(null);
-      return;
-    }
-    const kind = layer === "temperature" ? "temperature" : layer === "rainfall" ? "precip" : "forage";
+    setLayerData(null);
+    const kind =
+      !world || layer === "terrain" || layer === "population"
+        ? null
+        : layer === "alleles"
+          ? alleleSpecies !== null && alleleUid !== null
+            ? `allele:${alleleSpecies}:${alleleUid}`
+            : null
+          : layer === "temperature"
+            ? "temperature"
+            : layer === "rainfall"
+              ? "precip"
+              : "forage";
+    layerKind.current = kind;
+    if (!kind) return;
     client.send({ type: "layer", kind });
     if (kind === "precip") return;
     const t = setInterval(() => client.send({ type: "layer", kind }), 1500);
     return () => clearInterval(t);
-  }, [layer, world, client]);
+  }, [layer, world, client, alleleSpecies, alleleUid]);
+
+  // Allele-frequency layer: the species defaults to the selected one, and its list of
+  // polymorphic alleles is refreshed while time runs.
+  useEffect(() => {
+    if (layer !== "alleles" || alleleSpecies !== null) return;
+    const alive = species.filter((s) => s.extinct_year === null);
+    const pick = alive.find((s) => s.id === selectedSpecies) ?? alive[0];
+    if (pick) setAlleleSpecies(pick.id);
+  }, [layer, alleleSpecies, species, selectedSpecies]);
+  useEffect(() => {
+    if (!world || layer !== "alleles" || alleleSpecies === null) return;
+    client.send({ type: "alleles", species: alleleSpecies });
+    const t = setInterval(() => client.send({ type: "alleles", species: alleleSpecies }), 3000);
+    return () => clearInterval(t);
+  }, [layer, alleleSpecies, world, client]);
+  useEffect(() => {
+    // Start with the most variable allele; keep a chosen one even if it is lost or fixed.
+    if (alleles && alleles.species === alleleSpecies && alleleUid === null && alleles.list.length) setAlleleUid(alleles.list[0].uid);
+  }, [alleles, alleleSpecies, alleleUid]);
 
   useEffect(() => {
     if (world) client.send({ type: "density", on: layer === "population", species: densitySpecies });
@@ -449,6 +493,15 @@ export default function App() {
                 setLayer={setLayer}
                 densitySpecies={densitySpecies}
                 setDensitySpecies={setDensitySpecies}
+                alleleSpecies={alleleSpecies}
+                setAlleleSpecies={(id) => {
+                  setAlleleSpecies(id);
+                  setAlleleUid(null);
+                  setAlleles(null);
+                }}
+                alleles={alleles && alleles.species === alleleSpecies ? alleles.list : null}
+                alleleUid={alleleUid}
+                setAlleleUid={setAlleleUid}
                 tool={tool}
                 setTool={setTool}
                 modeChoice={modeChoice}

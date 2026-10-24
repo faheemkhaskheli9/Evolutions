@@ -430,9 +430,13 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "layer":
         if (engine) {
-          const data = engine.layer(m.kind);
+          const allele = /^allele:(\d+):(\d+)$/.exec(m.kind);
+          const data = allele ? engine.allele_frequency(Number(allele[1]), Number(allele[2])) : engine.layer(m.kind);
           post({ type: "layer", kind: m.kind, data }, [data.buffer]);
         }
+        break;
+      case "alleles":
+        if (engine) post({ type: "alleles", species: m.species, list: JSON.parse(engine.alleles(m.species)) });
         break;
       case "density":
         densityOn = m.on;

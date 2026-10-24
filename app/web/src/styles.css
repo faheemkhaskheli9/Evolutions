@@ -576,6 +576,22 @@ td.down {
   gap: 6px;
   margin: 4px 0 8px;
 }
+.allele-layer select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1;
+}
+.ramp-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.ramp-legend i {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+}
 .chip {
   border-radius: 999px;
   font-size: 12.5px;

@@ -391,4 +391,137 @@ impl Simulation {
                 .collect(),
         )
     }
+
+    /// The demes counted in the current mode (Individual mode counts only those held
+    /// outside the focus region; the rest are animals).
+    fn counted_demes(&self) -> &[crate::population::Deme] {
+        match self.mode {
+            Mode::Individual => &self.frozen,
+            Mode::Population => &self.demes,
+        }
+    }
+
+    /// Polymorphic alleles of a species (overall frequency 1–99%), for the
+    /// allele-frequency map layer (PRD FR-O1): trait loci first, then
+    /// incompatibility and neutral loci, each by expected heterozygosity.
+    /// Alleles are named by `uid`, which survives allele-table compaction.
+    pub fn allele_list(&self, species: u32, limit: usize) -> Value {
+        let mut copies: std::collections::HashMap<u32, f64> = Default::default();
+        let mut genomes = 0f64;
+        let mut arch = None;
+        for a in self.animals.iter().filter(|a| a.species == species) {
+            arch = Some(a.arch);
+            genomes += 1.0;
+            for h in &a.genome.hap {
+                for &x in h {
+                    *copies.entry(x).or_default() += 1.0;
+                }
+            }
+        }
+        for d in self.counted_demes().iter().filter(|d| d.species == species) {
+            let n = d.total() as f64;
+            arch = Some(d.arch);
+            genomes += n;
+            for locus in &d.freqs {
+                for &(x, f) in locus {
+                    *copies.entry(x).or_default() += 2.0 * n * f as f64;
+                }
+            }
+        }
+        let Some(arch) = arch.and_then(|g| self.archs.get(g as usize)) else {
+            return json!([]);
+        };
+        if genomes == 0.0 {
+            return json!([]);
+        }
+        let mut rows: Vec<(u8, f64, u32, f64)> = copies
+            .into_iter()
+            .filter_map(|(x, c)| {
+                let p = c / (2.0 * genomes);
+                if !(0.01..=0.99).contains(&p) {
+                    return None;
+                }
+                let rank = match arch.loci.get(self.alleles.get(x).locus as usize)?.kind {
+                    crate::genetics::LocusKind::Trait(_) => 0,
+                    crate::genetics::LocusKind::Dmi => 1,
+                    crate::genetics::LocusKind::Neutral => 2,
+                };
+                Some((rank, -p * (1.0 - p), x, p))
+            })
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+        Value::Array(
+            rows.into_iter()
+                .take(limit)
+                .map(|(rank, _, x, p)| {
+                    const KINDS: [&str; 3] = ["trait", "incompatibility", "neutral"];
+                    let a = self.alleles.get(x);
+                    let effects: Vec<Value> = a
+                        .effects
+                        .iter()
+                        .filter(|e| e.0 != crate::genetics::NO_TRAIT && e.1 != 0.0)
+                        .map(|e| {
+                            let t = Trait::from_index(e.0 as usize).info();
+                            json!({"key": t.key, "label": t.label, "effect": e.1})
+                        })
+                        .collect();
+                    json!({
+                        "uid": a.uid,
+                        "locus": a.locus,
+                        "kind": KINDS[rank as usize],
+                        "derived": a.derived,
+                        "origin_year": a.origin_year,
+                        "dominance": a.dominance,
+                        "effects": effects,
+                        "freq": p,
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// Frequency of one allele (by `uid`) in a species, per tile: pooled over each
+    /// patch's animals and demes and laid over the patch's land tiles; -1 where the
+    /// species is absent or the allele is unknown.
+    pub fn allele_frequency(&self, species: u32, uid: u64) -> Vec<f32> {
+        let n = self.world.w * self.world.h;
+        let mut out = vec![-1f32; n];
+        let Some(id) = self.alleles.alleles.iter().position(|a| a.uid == uid) else {
+            return out;
+        };
+        let locus = self.alleles.get(id as u32).locus as usize;
+        // Per patch: (copies of the allele, genome copies).
+        let mut acc: std::collections::HashMap<u32, (f64, f64)> = Default::default();
+        for a in self.animals.iter().filter(|a| a.species == species) {
+            let e = acc.entry(self.patch_of_tile_xy(a.x, a.y)).or_default();
+            for h in &a.genome.hap {
+                if h.get(locus) == Some(&(id as u32)) {
+                    e.0 += 1.0;
+                }
+            }
+            e.1 += 2.0;
+        }
+        for d in self.counted_demes().iter().filter(|d| d.species == species) {
+            let n2 = 2.0 * d.total() as f64;
+            let f = d
+                .freqs
+                .get(locus)
+                .and_then(|l| l.iter().find(|x| x.0 == id as u32))
+                .map_or(0.0, |x| x.1 as f64);
+            let e = acc.entry(d.patch).or_default();
+            e.0 += f * n2;
+            e.1 += n2;
+        }
+        for (i, v) in out.iter_mut().enumerate() {
+            if !self.world.is_land(i) {
+                continue;
+            }
+            if let Some(&(c, t)) = acc.get(&self.patch_of_tile(i)) {
+                if t > 0.0 {
+                    *v = (c / t) as f32;
+                }
+            }
+        }
+        out
+    }
 }
