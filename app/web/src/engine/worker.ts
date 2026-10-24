@@ -2,7 +2,7 @@
 // Engine host: owns the WASM simulation, runs the time loop, and streams frames
 // to the UI (System Design §5 and §7).
 
-import init, { Engine } from "../wasm/evo_wasm.js";
+import init, { Engine, ReplayRun } from "../wasm/evo_wasm.js";
 import { readAutosave, writeAutosave } from "./autosave";
 import type { FrameMsg, FromWorker, ModeChoice, SimEvent, SpeciesInfo, StopCondition, ToWorker } from "./protocol";
 
@@ -347,6 +347,48 @@ async function jump(years: number, until?: StopCondition) {
   }
 }
 
+/**
+ * Recreates a world from a replay script, applying its logged actions at their times
+ * (PRD FR-P2), then reports whether it matches the original run. Runs in slices like a
+ * jump, and can be stopped; the current world is kept until the replay finishes.
+ */
+async function replay(script: string) {
+  let run: ReplayRun | null = new ReplayRun(script);
+  jumping = true;
+  cancelJump = false;
+  playing = false;
+  const endYear = run.end_year();
+  try {
+    let done = false;
+    while (!done && !cancelJump) {
+      const t0 = performance.now();
+      while (!done && performance.now() - t0 < 40) done = run.advance(1);
+      post({ type: "progress", done: run.year(), total: endYear, label: `Year ${Math.floor(run.year()).toLocaleString()}`, title: "Replaying…" });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    if (done) {
+      const same = run.matches();
+      replaceEngine(run.finish());
+      run = null;
+      sendCreated();
+      post({
+        type: "notice",
+        message: same
+          ? `Replayed to year ${Math.floor(endYear).toLocaleString()}: identical to the original run.`
+          : `Replayed to year ${Math.floor(endYear).toLocaleString()}, but the world differs from the original run (made by another engine version, or the log was edited).`,
+      });
+    } else {
+      post({ type: "notice", message: "Replay stopped; the current world is unchanged." });
+    }
+  } catch (e) {
+    fail(e);
+  } finally {
+    run?.free();
+    jumping = false;
+    post({ type: "jumpDone" });
+  }
+}
+
 ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
   const m = ev.data;
   try {
@@ -451,6 +493,14 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "newick":
         if (engine) post({ type: "newick", text: engine.newick() });
+        break;
+      case "exportReplay":
+        if (engine) post({ type: "replayScript", text: engine.replay_script() });
+        break;
+      case "replay":
+        if (jumping) break;
+        if (m.script !== undefined) void replay(m.script).catch(fail);
+        else if (engine) void replay(engine.replay_script()).catch(fail);
         break;
     }
   } catch (e) {

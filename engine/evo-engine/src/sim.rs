@@ -9,6 +9,7 @@ use crate::params::{Realism, SimParams};
 use crate::physiology::{derive, growth_mass};
 use crate::population::Deme;
 use crate::record::{Event, EventKind, Metrics, TraitStats};
+use crate::replay::{Action, ReplayLog};
 use crate::rng::{stream, Rng};
 use crate::species::SpeciesRegistry;
 use crate::species_lib;
@@ -20,7 +21,8 @@ use std::collections::BTreeMap;
 
 pub const SAVE_MAGIC: &[u8; 4] = b"EVO1";
 /// Bumped whenever a model change alters outcomes (TRD TR-DA2).
-pub const MODEL_VERSION: u32 = 1;
+/// Version 2 added the replay log after the simulation state in save files.
+pub const MODEL_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -109,10 +111,15 @@ pub struct Simulation {
     /// Last Population-mode step's vital rates per deme: (species, patch, n, rates).
     #[serde(skip)]
     pub diagnostics: Vec<(u32, u32, u32, crate::population::Annual)>,
+    /// Creation settings and user actions (PRD FR-P2). Saved after the state, as JSON,
+    /// so it is not part of `state_hash()`.
+    #[serde(skip)]
+    pub replay: ReplayLog,
 }
 
 impl Simulation {
     pub fn new(cfg: NewWorld) -> Result<Simulation, String> {
+        let origin = cfg.clone();
         let tmpl = if cfg.template == "random" {
             templates::random(cfg.seed)
         } else {
@@ -183,6 +190,10 @@ impl Simulation {
             index: Default::default(),
             pending: vec![],
             diagnostics: vec![],
+            replay: ReplayLog {
+                origin: Some(origin),
+                entries: vec![],
+            },
         };
         sim.event(
             EventKind::Info,
@@ -672,7 +683,7 @@ impl Simulation {
         }
         if self.mode == Mode::Individual && self.animals.len() > self.params.individual_cap {
             let n = self.animals.len();
-            if self.set_mode(Mode::Population).is_ok() {
+            if self.switch_mode(Mode::Population).is_ok() {
                 self.event(
                     EventKind::Mode,
                     None,
@@ -690,6 +701,15 @@ impl Simulation {
     /// Switches fidelity mode (TRD §5.13). P → I fails if too many animals would result;
     /// use [`Simulation::focus_region`] to watch part of a large world instead.
     pub fn set_mode(&mut self, target: Mode) -> Result<(), String> {
+        let changed = target != self.mode;
+        self.switch_mode(target)?;
+        if changed {
+            self.log(Action::Mode(target));
+        }
+        Ok(())
+    }
+
+    fn switch_mode(&mut self, target: Mode) -> Result<(), String> {
         if target == self.mode {
             return Ok(());
         }
@@ -728,13 +748,23 @@ impl Simulation {
     /// Simulates only the demes in a rectangle (tile coordinates) as individuals; the rest
     /// of the world is held as demes until returning to Population mode (TRD TR-T4).
     pub fn focus_region(&mut self, x0: u32, y0: u32, x1: u32, y1: u32) -> Result<u64, String> {
+        let mode = self.mode;
+        let r = self.focus_inner(x0, y0, x1, y1);
+        // A refused region may still have left Individual mode first.
+        if r.is_ok() || self.mode != mode {
+            self.log(Action::Focus([x0, y0, x1, y1]));
+        }
+        r
+    }
+
+    fn focus_inner(&mut self, x0: u32, y0: u32, x1: u32, y1: u32) -> Result<u64, String> {
         let (w, h) = (self.world.w as u32, self.world.h as u32);
         // Clamp to the map (x1 may run up to one world width past the seam).
         let x0 = x0 % w;
         let x1 = x1.clamp(x0, x0 + w - 1);
         let (y0, y1) = (y0.min(h - 1), y1.min(h - 1));
         if self.mode == Mode::Individual {
-            self.set_mode(Mode::Population)?;
+            self.switch_mode(Mode::Population)?;
         }
         let ps = self.params.patch_size as u32;
         let pw = self.patches_w() as u32;
@@ -1127,6 +1157,12 @@ impl Simulation {
     // ---- Interventions ----------------------------------------------------------------
 
     pub fn apply(&mut self, iv: Intervention) -> Result<(), String> {
+        self.apply_inner(iv.clone())?;
+        self.log(Action::Intervention(iv));
+        Ok(())
+    }
+
+    fn apply_inner(&mut self, iv: Intervention) -> Result<(), String> {
         match iv {
             Intervention::ClimateShift { delta_c } => {
                 if !(-15.0..=15.0).contains(&delta_c) {
@@ -1313,23 +1349,80 @@ impl Simulation {
 
     // ---- Persistence ----------------------------------------------------------------------
 
+    /// Save file: magic, the state (bincode), then the replay log (JSON in a bincode string).
     pub fn save_bytes(&self) -> Result<Vec<u8>, String> {
         let mut out = SAVE_MAGIC.to_vec();
-        out.extend(bincode::serialize(self).map_err(|e| e.to_string())?);
+        let mut sim = bincode::serialize(self).map_err(|e| e.to_string())?;
+        // The state is written as the current version even when it was loaded from an older save.
+        sim[..4].copy_from_slice(&MODEL_VERSION.to_le_bytes());
+        out.extend(sim);
+        let log = serde_json::to_string(&self.replay).map_err(|e| e.to_string())?;
+        out.extend(bincode::serialize(&log).map_err(|e| e.to_string())?);
         Ok(out)
     }
 
     pub fn load_bytes(bytes: &[u8]) -> Result<Simulation, String> {
-        if bytes.len() < 4 || &bytes[..4] != SAVE_MAGIC {
+        if bytes.len() < 8 || &bytes[..4] != SAVE_MAGIC {
             return Err("not an Evolutions save file".into());
         }
-        let sim: Simulation =
-            bincode::deserialize(&bytes[4..]).map_err(|e| format!("corrupt save: {e}"))?;
-        if sim.model_version > MODEL_VERSION {
+        let body = &bytes[4..];
+        // `model_version` is the first field: a little-endian u32.
+        let version = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
+        if version > MODEL_VERSION {
             return Err("save was made by a newer engine".into());
         }
+        let corrupt = |e: String| format!("corrupt save: {e}");
+        let mut sim = if version >= 2 {
+            let mut de = bincode::Deserializer::from_slice(body, bincode_options());
+            let mut sim = Simulation::deserialize(&mut de).map_err(|e| corrupt(e.to_string()))?;
+            let log = String::deserialize(&mut de).map_err(|e| corrupt(e.to_string()))?;
+            sim.replay = serde_json::from_str(&log).map_err(|e| corrupt(e.to_string()))?;
+            sim.validate().map_err(corrupt)?;
+            sim
+        } else {
+            // Version 1 saves have no replay log, and the earliest ones have no allele uids.
+            Simulation::load_v1(body, false).or_else(|_| Simulation::load_v1(body, true))?
+        };
+        sim.model_version = MODEL_VERSION;
+        Ok(sim)
+    }
+
+    fn load_v1(body: &[u8], legacy_alleles: bool) -> Result<Simulation, String> {
+        let mut patched;
+        let body = if legacy_alleles {
+            // The earliest saves also predate `SimParams::dmi_rate_factor`: insert the default.
+            if body.len() < DMI_RATE_FACTOR_OFFSET {
+                return Err("corrupt save: too short".into());
+            }
+            patched = body[..DMI_RATE_FACTOR_OFFSET].to_vec();
+            patched.extend(SimParams::default().dmi_rate_factor.to_le_bytes());
+            patched.extend(&body[DMI_RATE_FACTOR_OFFSET..]);
+            &patched[..]
+        } else {
+            body
+        };
+        let sim: Simulation =
+            crate::genetics::with_legacy_alleles(legacy_alleles, || bincode::deserialize(body))
+                .map_err(|e| format!("corrupt save: {e}"))?;
         sim.validate().map_err(|e| format!("corrupt save: {e}"))?;
         Ok(sim)
+    }
+
+    /// Bytes in the version 1 save format, for testing the migration. With
+    /// `legacy_alleles`, alleles are written without uids and the parameters without
+    /// `dmi_rate_factor`, as the earliest saves were.
+    #[doc(hidden)]
+    pub fn save_bytes_v1(&self, legacy_alleles: bool) -> Vec<u8> {
+        let mut out = SAVE_MAGIC.to_vec();
+        let mut sim = crate::genetics::with_legacy_alleles(legacy_alleles, || {
+            bincode::serialize(self).unwrap_or_default()
+        });
+        sim[..4].copy_from_slice(&1u32.to_le_bytes());
+        if legacy_alleles {
+            sim.drain(DMI_RATE_FACTOR_OFFSET..DMI_RATE_FACTOR_OFFSET + 8);
+        }
+        out.extend(sim);
+        out
     }
 
     /// Checks the invariants that stepping relies on, so a damaged save is rejected
@@ -1345,6 +1438,14 @@ impl Simulation {
         let tiles = self.world.w * self.world.h;
         if self.world.w == 0 || self.world.elevation.len() != tiles {
             return Err("world size does not match its terrain".into());
+        }
+        if self
+            .alleles
+            .alleles
+            .iter()
+            .any(|a| a.uid >= self.alleles.next_uid)
+        {
+            return Err("allele table out of range".into());
         }
         let n_patches = (self.patches_w() * self.patches_h()) as u32;
         let n_species = self.species.list.len() as u32;
@@ -1375,6 +1476,19 @@ impl Simulation {
         }
         h
     }
+}
+
+/// Byte offset of `params.dmi_rate_factor` in a serialized `Simulation`: model_version (4),
+/// seed, tick_minutes, day_minutes, year_days (8 each), realism (4), mutation_rate,
+/// mutation_multiplier, neutral_rate_factor (8 each).
+const DMI_RATE_FACTOR_OFFSET: usize = 4 + 8 * 4 + 4 + 8 * 3;
+
+/// The options `bincode::serialize` and `bincode::deserialize` use.
+fn bincode_options() -> impl bincode::Options {
+    use bincode::Options;
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
 }
 
 /// Rotates an RGB colour's hue so daughter species get related but distinct colours.

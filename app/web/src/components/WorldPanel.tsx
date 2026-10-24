@@ -27,6 +27,10 @@ interface Props {
   setFounderSpecies: (s: string) => void;
   founderCount: number;
   setFounderCount: (n: number) => void;
+  onExportReplay: () => void;
+  onReplay: () => void;
+  /** A jump or replay is running. */
+  busy: boolean;
 }
 
 const LAYERS: { key: Layer; label: string }[] = [
@@ -200,6 +204,19 @@ export function WorldPanel(p: Props) {
             Strike
           </button>
         </div>
+      </div>
+      <h3>Replay</h3>
+      <p className="muted small">
+        Every intervention, mode switch and watched region is logged with its date. Export the log to share the run: opening it rebuilds the world from its seed and
+        replays it exactly.
+      </p>
+      <div className="row wrap">
+        <button disabled={!p.status || p.busy} onClick={p.onExportReplay}>
+          Export replay log
+        </button>
+        <button disabled={!p.status || p.busy} onClick={p.onReplay} title="Rebuild this world from its seed and check it ends up identical">
+          Replay from the start
+        </button>
       </div>
       {p.status && (
         <>

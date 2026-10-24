@@ -30,6 +30,7 @@ pub mod params;
 pub mod physiology;
 pub mod population;
 pub mod record;
+pub mod replay;
 pub mod rng;
 pub mod sim;
 pub mod species;
@@ -39,5 +40,6 @@ pub mod traits;
 pub mod world;
 
 pub use params::{Realism, SimParams};
+pub use replay::{Replay, ReplayScript};
 pub use sim::{Intervention, Mode, NewWorld, Simulation};
 pub use templates::FounderGroup;

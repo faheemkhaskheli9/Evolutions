@@ -62,7 +62,7 @@ export default function App() {
   const layerKind = useRef<string | null>(null);
   const [tool, setTool] = useState<Tool>("inspect");
   const [view, setView] = useState<View>(savedView);
-  const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; label: string; title?: string } | null>(null);
   const [notices, setNotices] = useState<{ id: number; text: string; error?: boolean }[]>([]);
   const [showNew, setShowNew] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -140,7 +140,7 @@ export default function App() {
           break;
         }
         case "progress":
-          setProgress({ done: m.done, total: m.total, label: m.label });
+          setProgress({ done: m.done, total: m.total, label: m.label, title: m.title });
           break;
         case "jumpDone":
           setProgress(null);
@@ -178,6 +178,10 @@ export default function App() {
           break;
         case "newick":
           downloadBlob(m.text, "phylogeny.nwk", "text/plain");
+          break;
+        case "replayScript":
+          downloadBlob(m.text, `evolutions-replay-${Date.now()}.json`, "application/json");
+          notify("Replay log exported. Open it to replay the run.");
           break;
         case "notice":
           notify(m.message);
@@ -276,6 +280,11 @@ export default function App() {
     client.send({ type: "create", config: cfg });
   };
   const load = async (file: File) => {
+    if (file.name.toLowerCase().endsWith(".json")) {
+      // A replay script (PRD FR-P2): rebuild the world from its seed and logged actions.
+      client.send({ type: "replay", script: await file.text() });
+      return;
+    }
     setBusy(true);
     const bytes = await file.arrayBuffer();
     client.send({ type: "load", bytes }, [bytes]);
@@ -369,7 +378,7 @@ export default function App() {
             Open
             <input
               type="file"
-              accept=".evo"
+              accept=".evo,.json"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 // Reset so choosing the same file again still fires onChange.
@@ -511,6 +520,9 @@ export default function App() {
                 setFounderSpecies={setFounderSpecies}
                 founderCount={founderCount}
                 setFounderCount={setFounderCount}
+                onExportReplay={() => client.send({ type: "exportReplay" })}
+                onReplay={() => client.send({ type: "replay" })}
+                busy={!!progress}
               />
             )}
           </div>
@@ -554,7 +566,7 @@ export default function App() {
       {progress && (
         <div className="progress-overlay" role="status">
           <div className="progress-card">
-            <b>Fast-forwarding…</b>
+            <b>{progress.title ?? "Fast-forwarding…"}</b>
             <span>
               {progress.label} — {formatYears(progress.done)} of {formatYears(progress.total)}
             </span>

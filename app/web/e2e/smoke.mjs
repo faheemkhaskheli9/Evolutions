@@ -2,6 +2,8 @@
 // Usage: npm run build && npm run test:e2e   (set SHOTS=dir to save screenshots)
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium } from "playwright-core";
 
 const PORT = 4179;
@@ -153,6 +155,16 @@ try {
     await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });
     await page.getByRole("button", { name: "Resume" }).click();
     await page.locator(".badge").waitFor({ timeout: 30000 });
+  });
+  await step("export a replay log and replay it", async () => {
+    // The log survived the autosave, so the resumed world can be replayed from its seed.
+    await page.getByRole("tab", { name: "World" }).click();
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export replay log" }).click()]);
+    const file = join(tmpdir(), `evo-replay-${process.pid}.json`);
+    await download.saveAs(file);
+    await page.locator("header input[type=file]").setInputFiles(file);
+    await page.getByText("Replaying…").waitFor();
+    await page.getByText(/identical to the original run/).waitFor({ timeout: 300000 });
   });
   const fatal = errors.filter((e) => !/favicon/.test(e));
   if (fatal.length) throw new Error(`page errors:\n${fatal.join("\n")}`);
