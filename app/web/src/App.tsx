@@ -113,7 +113,9 @@ export default function App() {
             f.shape = undefined;
           }
           if (m.snow) f.snow = m.snow;
+          if (m.forage) f.forage = m.forage;
           f.day = m.status.day_of_year;
+          f.days = m.status.days;
           f.speed = m.playing ? m.achievedSpeed : 0;
           if (m.density) {
             f.density = m.density;

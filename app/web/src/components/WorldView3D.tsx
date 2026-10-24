@@ -57,8 +57,12 @@ export function WorldView3D(props: Props) {
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.setWorld(world.w, world.h, elevation, water, hydro);
-  }, [world, elevation, water, hydro]);
+    sceneRef.current?.setWorld(world.w, world.h, elevation, water, hydro, biome, {
+      north: world.lat_north,
+      south: world.lat_south,
+      tilt: world.axial_tilt ?? 23.44,
+    });
+  }, [world, elevation, water, hydro, biome]);
 
   // Rivers are drawn as water in the scene, so the ground under them shows its biome.
   const terrain = useMemo(() => buildTerrain(world, elevation, biome, water, false), [world, elevation, biome, water]);
@@ -89,11 +93,13 @@ export function WorldView3D(props: Props) {
     const showRanges = rangesVisible && !!f.density && !!f.dominant && (f.mode === "Population" || !!f.focus || layer === "population");
     if (showRanges) ctx.drawImage(buildDemes(world, f.density!, f.dominant!, speciesColors, layer === "population"), 0, 0);
     scene.setTexture(c);
+    // The clock first: the inspected animal's path is stamped with the current day.
+    scene.setClock(f.day ?? 0.5, f.speed ?? 0, f.days ?? 0);
+    scene.setPlants(f.forage, layer === "terrain" || layer === "vegetation");
     // Herds stand on the map wherever animals are not simulated one by one, and on the density layer.
     scene.setHerds(f.density, f.dominant, speciesColors, layer === "population", showRanges);
     scene.setAnimals(layer === "population" ? undefined : f.positions, f.species, f.actions, f.ids, f.shape, speciesColors);
     scene.setFocus(f.focus);
-    scene.setClock(f.day ?? 0.5, f.speed ?? 0);
   }, [frameVersion, world, terrain, overlay, snow, layer, speciesColors, frame]);
 
   useEffect(() => {

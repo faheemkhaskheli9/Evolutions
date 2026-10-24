@@ -61,6 +61,8 @@ export interface WorldInfo {
   tile_km: number;
   lat_north: number;
   lat_south: number;
+  /** Axial tilt (degrees): how far the sun moves north and south over the year. */
+  axial_tilt: number;
   template: string;
   template_key: string;
   seed: number;
@@ -70,6 +72,8 @@ export interface WorldInfo {
 export interface Status {
   year: number;
   day_of_year: number;
+  /** Days since the start, with the time of day as the fraction. */
+  days: number;
   hour: number;
   mode: "Individual" | "Population";
   focus: [number, number, number, number] | null;
@@ -179,6 +183,8 @@ export interface FrameMsg {
   dominant?: Uint32Array;
   /** Snow cover per tile (0–1) for the current day; sent when the day changes. */
   snow?: Float32Array;
+  /** Forage per tile as a fraction of its maximum (-1 where nothing grows); sent about once a second. */
+  forage?: Float32Array;
   events: SimEvent[];
   speciesList?: SpeciesInfo[];
 }
