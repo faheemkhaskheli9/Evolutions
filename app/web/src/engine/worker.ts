@@ -25,6 +25,9 @@ let capExceeded = false;
 let jumping = false;
 let cancelJump = false;
 
+/** Day of the year the snow cover was last sent for (NaN: send on the next frame). */
+let snowDay = NaN;
+let precip: Float32Array | null = null;
 let densityOn = false;
 let densitySpecies: number | null = null;
 let lastAutosave = 0;
@@ -94,8 +97,11 @@ function sendCreated() {
       elevation: engine.layer("elevation"),
       biome: engine.layer("biome"),
       water: engine.layer("water"),
+      hydro: { flow: engine.layer("river_flow"), downstream: engine.layer("downstream"), level: engine.layer("water_level") },
     },
   );
+  precip = engine.layer("precip");
+  snowDay = NaN;
   eventsSent = 0;
   lastSpeciesPost = 0;
   achieved = 0;
@@ -128,7 +134,16 @@ function sendFrame(full = false) {
     msg.positions = engine.positions();
     msg.species = engine.frame_species();
     msg.actions = engine.frame_actions();
-    transfer.push(msg.positions.buffer, msg.species.buffer, msg.actions.buffer);
+    msg.ids = engine.frame_ids();
+    msg.shape = engine.frame_shape();
+    transfer.push(msg.positions.buffer, msg.species.buffer, msg.actions.buffer, msg.ids.buffer, msg.shape.buffer);
+  }
+  // Snow cover changes with the season, so it is sent only when the day has moved on.
+  const day = Math.floor(status.day_of_year);
+  if (full || day !== snowDay) {
+    snowDay = day;
+    msg.snow = snowCover(engine);
+    transfer.push(msg.snow.buffer);
   }
   if (status.mode === "Population" || status.focus || densityOn) {
     if (full || now - lastDensityPost > 300) {
@@ -143,6 +158,16 @@ function sendFrame(full = false) {
     msg.speciesList = JSON.parse(engine.species());
   }
   post(msg, transfer);
+}
+
+/** Snow per tile: lies where the day is below freezing and there is enough precipitation (as in the engine's camouflage background). */
+function snowCover(e: Engine) {
+  const t = e.layer("temperature");
+  const out = new Float32Array(t.length);
+  for (let i = 0; i < t.length; i++) {
+    if (precip && precip[i] > 150) out[i] = Math.max(0, Math.min(1, (-0.5 - t[i]) / 4));
+  }
+  return out;
 }
 
 /**

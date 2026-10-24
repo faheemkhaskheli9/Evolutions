@@ -45,6 +45,16 @@ export interface Catalog {
   biomes: string[];
 }
 
+/** Rivers and lakes, per tile (drawn as water surfaces in the 3D world). */
+export interface Hydrology {
+  /** Water flowing through the tile (the engine's flow accumulation). */
+  flow: Float32Array;
+  /** Index of the tile it drains into, or -1 at an outlet. */
+  downstream: Float32Array;
+  /** Water surface in metres: a lake's level, otherwise the ground. */
+  level: Float32Array;
+}
+
 export interface WorldInfo {
   w: number;
   h: number;
@@ -161,15 +171,21 @@ export interface FrameMsg {
   positions?: Float32Array;
   species?: Uint32Array;
   actions?: Uint8Array;
+  /** Animal ids, in the order of `positions`. */
+  ids?: Float64Array;
+  /** Four values per animal: mass (kg), leg length index, ornament (0–1), coat luminance (0–1). */
+  shape?: Float32Array;
   density?: Float32Array;
   dominant?: Uint32Array;
+  /** Snow cover per tile (0–1) for the current day; sent when the day changes. */
+  snow?: Float32Array;
   events: SimEvent[];
   speciesList?: SpeciesInfo[];
 }
 
 export type FromWorker =
   | { type: "ready"; catalog: Catalog; autosave: AutosaveInfo | null }
-  | { type: "created"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array }
+  | { type: "created"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array; hydro: Hydrology }
   | FrameMsg
   | { type: "progress"; done: number; total: number; label: string }
   | { type: "jumpDone" }

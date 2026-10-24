@@ -5,7 +5,7 @@
 | Document | Implementation plan |
 | Feature | A single 3D world that contains the whole simulation |
 | Date | 2026-10-19 |
-| Status | Phases 1–4 done; phase 5 proposed |
+| Status | Phases 1–5 done |
 | Related | [3D World PRD](./3D_WORLD_PRD.md) · [3D World TRD](./3D_WORLD_TRD.md) · [3D World System Design](./3D_WORLD_SYSTEM_DESIGN.md) |
 
 ---
@@ -59,16 +59,24 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | 4.2 | End-to-end smoke test passes with the 3D view as the default. | |
 | 4.3 | User guide and README describe the 3D world, with screenshots. | |
 
-### Phase 5: Next (proposed)
+### Phase 5: Life and time in the scene (done)
+
+| # | Task | Result |
+|---|---|---|
+| 5.1 | The engine sends animal ids with each frame. Each animal eases from where it is drawn to its new position over the time between position updates, faces the way it walks, and swings its legs (diagonal pairs in opposite phase) while it moves. A move over 3 tiles snaps. | Animals walk instead of stepping from frame to frame. |
+| 5.2 | The engine sends four shape values per animal (current mass, leg length, ornament, coat luminance). Body length scales with the cube root of mass relative to the frame's geometric mean (0.7–1.6×); legs stretch and lift the body; the tail plume grows with the ornament and is drawn orange; the coat lightens or darkens the species colour. One shader does this for all instances. | Evolved and individual differences, and the young, are visible directly. |
+| 5.3 | Day–night light from the engine's clock: the sun rises in the east, crosses the south and sets in the west; sky and fog go through dusk to night. Shown up to ~1 hour/s, fading out by 6 hours/s. Snow cover is sent when the day changes (below freezing with enough precipitation, as for camouflage) and laid over land and lakes. | Time of day and the seasons are visible in the scene. |
+| 5.4 | The engine exposes D8 flow directions (`downstream`) and the filled water surface (`water_level`). Rivers are ribbons from each river tile to the tile it drains into, wider with log flow; lakes are flat surfaces at their level. River tiles in the 3D texture show the land they cross. | Rivers and lakes read as water, not as blue tiles. |
+| 5.5 | Above 20,000 figures, small animals and herd figures are drawn as one sprite each (a silhouette, tinted per figure). | Large worlds stay responsive on weak GPUs. |
+| 5.6 | **Follow animal** button for the inspected animal; dragging, a new selection or its death stops it. The selection ring tracks the animal smoothly. | |
+
+### Next (proposed)
 
 | # | Task | Why |
 |---|---|---|
-| 5.1 | Walk animation and smooth movement between frames (interpolate positions). | Animals currently step from one frame position to the next. |
-| 5.2 | Body shape from phenotype (size from body mass, leg length, ornament colour). | Let the user see evolved differences directly. |
-| 5.3 | Day–night lighting and seasonal snow from the engine's clock and temperature. | Show time passing in the scene itself. |
-| 5.4 | Rivers and lakes as water surfaces rather than texture colour. | |
-| 5.5 | Level of detail: impostor sprites for distant animals above ~20,000 instances. | Keep frame rate on low-end GPUs. |
-| 5.6 | Camera "follow" for the selected animal. | |
+| 6.1 | Sun angle from latitude and season (and polar night). | Show seasons in the light, not only in snow. |
+| 6.2 | Vegetation as instanced trees and grass, thinned by forage. | Show grazing pressure in the scene. |
+| 6.3 | Show the inspected animal's path over the last day. | |
 
 ## Testing
 
@@ -81,5 +89,5 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | Risk | Mitigation |
 |---|---|
 | No WebGL (old hardware, locked-down browsers) | Automatic fallback to the flat map with a notice. |
-| Large worlds with many herds drop frames | Instancing, mesh reuse, layout only when data or zoom changes; phase 5.5 adds level of detail. |
+| Large worlds with many herds drop frames | Instancing, mesh reuse, layout only when data or zoom changes (or while animals move); sprites above 20,000 figures (5.5). |
 | 3D picking is less precise than the flat map | Pick radius scales with zoom; zooming in makes selection exact. |

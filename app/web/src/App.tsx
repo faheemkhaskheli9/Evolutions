@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
-import type { AutosaveInfo, Catalog, FromWorker, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
+import type { AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
 import { PhyloTree } from "./components/PhyloTree";
@@ -31,6 +31,7 @@ interface WorldState {
   elevation: Float32Array;
   biome: Float32Array;
   water: Float32Array;
+  hydro: Hydrology;
 }
 
 export default function App() {
@@ -82,7 +83,7 @@ export default function App() {
           setAutosave(m.autosave);
           break;
         case "created":
-          setWorld({ info: m.world, elevation: m.elevation, biome: m.biome, water: m.water });
+          setWorld({ info: m.world, elevation: m.elevation, biome: m.biome, water: m.water, hydro: m.hydro });
           setEvents([]);
           setSpecies([]);
           setSelectedSpecies(null);
@@ -102,11 +103,18 @@ export default function App() {
             f.positions = m.positions;
             f.species = m.species;
             f.actions = m.actions;
+            f.ids = m.ids;
+            f.shape = m.shape;
           } else if (m.status.mode === "Population") {
             f.positions = undefined;
             f.species = undefined;
             f.actions = undefined;
+            f.ids = undefined;
+            f.shape = undefined;
           }
+          if (m.snow) f.snow = m.snow;
+          f.day = m.status.day_of_year;
+          f.speed = m.playing ? m.achievedSpeed : 0;
           if (m.density) {
             f.density = m.density;
             f.dominant = m.dominant;
@@ -250,12 +258,14 @@ export default function App() {
     elevation: world.elevation,
     biome: world.biome,
     water: world.water,
+    hydro: world.hydro,
     frame,
     frameVersion,
     speciesColors,
     layer,
     layerData,
     selected,
+    selectedId: selected ? inspectId : null,
     tool,
     onPick: (x: number, y: number, r: number) => client.send({ type: "pick", x, y, radius: r }),
     onRegion: (rect: [number, number, number, number]) => {

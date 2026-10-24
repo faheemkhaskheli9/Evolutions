@@ -7,6 +7,7 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import type { Hydrology } from "../engine/protocol";
 import { ramp, type RGB } from "../util";
 
 const HEAT_RAMP: RGB[] = [
@@ -35,46 +36,238 @@ export interface CameraState {
   pitch: number;
 }
 
+/** A geometry made non-indexed with every vertex tagged as one body part (see the animal shader). */
+function part(geo: THREE.BufferGeometry, id: number) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  g.setAttribute("aPart", new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count).fill(id), 1));
+  return g;
+}
+
+// Body parts the animal shader treats differently.
+const BODY = 0;
+/** Tail plume, scaled by the ornament trait and drawn in the ornament colour. */
+const ORNAMENT = 1;
+/** Two diagonal leg pairs that swing in opposite phase when walking. */
+const LEGS_A = 2;
+const LEGS_B = 3;
+/** Legs that stretch with leg length but do not swing (the simple body). */
+const LEGS_STILL = 4;
+
 /** A small four-legged body, about 1 unit long, standing on y = 0 and facing +x. */
 function animalGeometry() {
   const parts: THREE.BufferGeometry[] = [];
   const body = new THREE.CapsuleGeometry(0.2, 0.45, 3, 8);
   body.rotateZ(Math.PI / 2);
   body.translate(0, 0.42, 0);
-  parts.push(body);
+  parts.push(part(body, BODY));
   const head = new THREE.SphereGeometry(0.15, 8, 6);
   head.translate(0.45, 0.58, 0);
-  parts.push(head);
-  for (const [lx, lz] of [
-    [0.25, 0.11],
-    [0.25, -0.11],
-    [-0.25, 0.11],
-    [-0.25, -0.11],
+  parts.push(part(head, BODY));
+  const tail = new THREE.ConeGeometry(0.11, 0.42, 6);
+  tail.rotateZ(0.75);
+  tail.translate(-0.55, 0.62, 0);
+  parts.push(part(tail, ORNAMENT));
+  for (const [lx, lz, id] of [
+    [0.25, 0.11, LEGS_A],
+    [0.25, -0.11, LEGS_B],
+    [-0.25, 0.11, LEGS_B],
+    [-0.25, -0.11, LEGS_A],
   ]) {
     const leg = new THREE.CylinderGeometry(0.045, 0.04, 0.3, 5);
     leg.translate(lx, 0.15, lz);
-    parts.push(leg);
+    parts.push(part(leg, id));
   }
-  const merged = mergeGeometries(parts.map((p) => p.toNonIndexed()))!;
+  const merged = mergeGeometries(parts)!;
   merged.computeVertexNormals();
   return merged;
 }
 
-/** The same body as three boxes (36 triangles), for figures too small on screen to show detail. */
+/** The same body as boxes (48 triangles), for figures too small on screen to show detail. */
 function simpleAnimalGeometry() {
   const body = new THREE.BoxGeometry(0.85, 0.36, 0.36).translate(0, 0.42, 0);
   const head = new THREE.BoxGeometry(0.26, 0.26, 0.26).translate(0.45, 0.58, 0);
+  const tail = new THREE.BoxGeometry(0.3, 0.14, 0.14).translate(-0.55, 0.62, 0);
   const legs = new THREE.BoxGeometry(0.62, 0.3, 0.26).translate(0, 0.15, 0);
-  const merged = mergeGeometries([body, head, legs].map((p) => p.toNonIndexed()))!;
+  const merged = mergeGeometries([part(body, BODY), part(head, BODY), part(tail, ORNAMENT), part(legs, LEGS_STILL)])!;
   merged.computeVertexNormals();
   return merged;
+}
+
+/**
+ * Bends the animal body per instance (`aShape`: leg length, ornament size, unused,
+ * gait). Legs stretch and lift the body; the tail plume grows from the rump with the
+ * ornament trait and takes the ornament colour; walking animals swing their legs.
+ */
+function shapeAnimals(mat: THREE.Material, time: { value: number }) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = time;
+    sh.vertexShader = sh.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+attribute float aPart;
+attribute vec4 aShape;
+uniform float uTime;
+varying float vOrnament;`,
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+{
+  bool ornament = aPart > 0.5 && aPart < 1.5;
+  if (ornament) transformed = vec3(-0.42, 0.5, 0.0) + (transformed - vec3(-0.42, 0.5, 0.0)) * aShape.y;
+  if (aPart > 1.5) {
+    if (aShape.w > 0.5 && aPart < 3.5) {
+      float swing = sin(uTime * 11.0 + fract(aShape.w) * 6.2832) * 0.2 * (0.3 - transformed.y) / 0.3;
+      transformed.x += aPart < 2.5 ? swing : -swing;
+    }
+    transformed.y *= aShape.x;
+  } else {
+    transformed.y += 0.3 * (aShape.x - 1.0);
+  }
+  vOrnament = ornament ? 1.0 : 0.0;
+}`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying float vOrnament;")
+      .replace("#include <color_fragment>", "#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.5, 0.1), vOrnament);");
+  };
+}
+
+/** A white side-on animal silhouette, tinted per point for distant figures drawn as sprites. */
+function spriteTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#fff";
+  g.beginPath();
+  g.ellipse(30, 30, 20, 10, 0, 0, Math.PI * 2);
+  g.ellipse(52, 22, 8, 7, 0, 0, Math.PI * 2);
+  g.fill();
+  for (const x of [16, 22, 38, 44]) g.fillRect(x - 2.5, 34, 5, 18);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Many figures as camera-facing sprites: one vertex each instead of a mesh. */
+class Sprites {
+  readonly points: THREE.Points;
+  private pos = new Float32Array(0);
+  private col = new Float32Array(0);
+
+  constructor(material: THREE.PointsMaterial) {
+    this.points = new THREE.Points(new THREE.BufferGeometry(), material);
+    this.points.frustumCulled = false;
+    this.points.visible = false;
+  }
+
+  reserve(n: number) {
+    if (this.pos.length >= n * 3) return;
+    const cap = Math.ceil(n * 1.3);
+    this.pos = new Float32Array(cap * 3);
+    this.col = new Float32Array(cap * 3);
+    const g = this.points.geometry;
+    g.setAttribute("position", new THREE.BufferAttribute(this.pos, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(this.col, 3));
+  }
+
+  set(k: number, x: number, y: number, z: number, c: THREE.Color) {
+    this.pos[3 * k] = x;
+    this.pos[3 * k + 1] = y;
+    this.pos[3 * k + 2] = z;
+    this.col[3 * k] = c.r;
+    this.col[3 * k + 1] = c.g;
+    this.col[3 * k + 2] = c.b;
+  }
+
+  /** Shows the first `count` figures, each about `size` scene units long. */
+  commit(count: number, size: number) {
+    const g = this.points.geometry;
+    this.points.visible = count > 0;
+    if (!count) return;
+    g.setDrawRange(0, count);
+    g.attributes.position.needsUpdate = true;
+    g.attributes.color.needsUpdate = true;
+    // With size attenuation three.js leaves the field of view out of the point size; dividing
+    // by tan(fov / 2) makes a sprite as long on screen as a body `size` long.
+    (this.points.material as THREE.PointsMaterial).size = (size * 1.25) / Math.tan(((FOV / 2) * Math.PI) / 180);
+  }
+
+  hide() {
+    this.points.visible = false;
+  }
+
+  dispose() {
+    this.points.geometry.dispose();
+  }
+}
+
+/** Scene height of an elevation (m): land to scale, the sea floor flattened. */
+function toHeight(e: number) {
+  return e >= 0 ? e * RELIEF : e * RELIEF * SEA_FLOOR;
+}
+
+/** Triangles from a flat position list, turned to face up and lit as if level. */
+function flatGeometry(pos: number[]) {
+  for (let t = 0; t < pos.length; t += 9) {
+    // Front faces wind counter-clockwise seen from above: (b - a) × (c - a) points up.
+    const cross = (pos[t + 5] - pos[t + 2]) * (pos[t + 6] - pos[t]) - (pos[t + 3] - pos[t]) * (pos[t + 8] - pos[t + 2]);
+    if (cross < 0) {
+      for (let k = 0; k < 3; k++) [pos[t + 3 + k], pos[t + 6 + k]] = [pos[t + 6 + k], pos[t + 3 + k]];
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  const normals = new Float32Array(pos.length);
+  for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+  g.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  return g;
 }
 
 /** Below this on-screen body length (px) animals use the simple geometry. */
 const DETAIL_PX = 16;
+/** Above this many figures, small ones are drawn as sprites rather than meshes. */
+const SPRITE_MIN = 20_000;
+/** Animals are moved smoothly between frames up to this many (the engine's individual cap). */
+const ANIMATE_MAX = 25_000;
+/** A move longer than this (tiles) between frames is a jump, not a walk. */
+const MAX_STEP = 3;
 
 /** Hash an index to an angle so a herd does not all face the same way. */
 const yawOf = (i: number) => (((i * 2654435761) >>> 0) / 4294967296) * Math.PI * 2;
+
+interface AnimalFrame {
+  pos: Float32Array;
+  species: Uint32Array;
+  actions?: Uint8Array;
+  ids?: Float64Array;
+  shape?: Float32Array;
+  colors: Map<number, RGB>;
+  /** Where each animal starts its current move (unwrapped, so the move is short). */
+  fromX: Float32Array;
+  fromY: Float32Array;
+  /** Facing angle about the vertical axis. */
+  heading: Float32Array;
+  /** Until when (ms) each animal counts as walking. */
+  walkUntil: Float64Array;
+  /** Row of each id, when animals are moved smoothly. */
+  index: Map<number, number> | null;
+  /** Body length relative to the frame's typical animal (from mass). */
+  scale: Float32Array;
+}
+
+/** Where animal `i` is drawn `a` (0–1) of the way through its move (x unwrapped). */
+function drawnAt(d: AnimalFrame, i: number, a: number): [number, number] {
+  const x = d.pos[2 * i];
+  const y = d.pos[2 * i + 1];
+  return [d.fromX[i] + (x - d.fromX[i]) * a, d.fromY[i] + (y - d.fromY[i]) * a];
+}
+
+const DAY_SKY = new THREE.Color(0x9cc3e4);
+const DUSK_SKY = new THREE.Color(0xd9906a);
+const NIGHT_SKY = new THREE.Color(0x22345a);
+const DAY_SUN = new THREE.Vector3(-0.6, 1, -0.4);
 
 export class World3D {
   readonly renderer: THREE.WebGLRenderer;
@@ -97,9 +290,37 @@ export class World3D {
 
   private animalGeo = animalGeometry();
   private simpleGeo = simpleAnimalGeometry();
+  /** Herds use their own copy: the animal geometries carry per-instance shape attributes. */
+  private herdGeo = simpleAnimalGeometry();
+  private time = { value: 0 };
   private animalMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   private animals: THREE.InstancedMesh | null = null;
-  private animalData: { pos: Float32Array; species: Uint32Array; actions?: Uint8Array; colors: Map<number, RGB> } | null = null;
+  private shapeAttr: THREE.InstancedBufferAttribute | null = null;
+  private animalData: AnimalFrame | null = null;
+  /** When the current moves started, and how long they take (the time between position updates). */
+  private moveStart = 0;
+  private moveMs = 100;
+  private lastMoveAt = 0;
+  private spriteTex = spriteTexture();
+  private animalSprites = new Sprites(new THREE.PointsMaterial({ map: this.spriteTex, vertexColors: true, alphaTest: 0.5 }));
+  private herdSprites = new Sprites(new THREE.PointsMaterial({ map: this.spriteTex, vertexColors: true, alphaTest: 0.5, transparent: true, opacity: 0.8 }));
+  /** Animal the camera follows, and who to tell when it can no longer be found. */
+  private followId: number | null = null;
+  onFollowLost: (() => void) | null = null;
+
+  private hemi = new THREE.HemisphereLight(0xdfefff, 0x4a4030, 1.6);
+  private sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+  private water: THREE.Mesh[] = [];
+  private riverMat = new THREE.MeshLambertMaterial({ color: 0x3e7ab2, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  private lakeMat = new THREE.MeshLambertMaterial({
+    color: 0x3a78b0,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
 
   private barGeo = new THREE.BoxGeometry(0.8, 1, 0.8).translate(0, 0.5, 0);
   private barMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
@@ -113,6 +334,7 @@ export class World3D {
   private focusRect: Rect | null = null;
   private selection: THREE.Mesh;
   private selected: { x: number; y: number } | null = null;
+  private selectedId: number | null = null;
 
   private frameRequested = false;
   private lastSize = -1;
@@ -129,13 +351,11 @@ export class World3D {
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    const sky = new THREE.Color(0x9cc3e4);
-    this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(sky, 100, 400);
-    this.scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a4030, 1.6));
-    const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
-    sun.position.set(-0.6, 1, -0.4);
-    this.scene.add(sun);
+    this.scene.background = DAY_SKY.clone();
+    this.scene.fog = new THREE.Fog(DAY_SKY.clone(), 100, 400);
+    this.sun.position.copy(DAY_SUN);
+    this.scene.add(this.hemi, this.sun, this.animalSprites.points, this.herdSprites.points);
+    shapeAnimals(this.animalMat, this.time);
 
     const boxGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1).translate(0.5, 0.5, 0.5));
     this.focusBox = new THREE.LineSegments(boxGeo, new THREE.LineBasicMaterial({ color: 0xffffff, fog: false }));
@@ -153,17 +373,15 @@ export class World3D {
 
   // ---------------------------------------------------------------- world
 
-  setWorld(w: number, h: number, elevation: Float32Array) {
+  setWorld(w: number, h: number, elevation: Float32Array, water: Float32Array, hydro: Hydrology) {
     this.w = w;
     this.h = h;
     this.heights = new Float32Array(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const e = elevation[i];
-      this.heights[i] = e >= 0 ? e * RELIEF : e * RELIEF * SEA_FLOOR;
-    }
+    for (let i = 0; i < w * h; i++) this.heights[i] = toHeight(elevation[i]);
     for (const m of this.terrain) this.scene.remove(m);
     if (this.sea) this.scene.remove(this.sea);
     this.terrainGeo?.dispose();
+    for (const m of this.water) m.geometry.dispose();
 
     // One vertex per tile centre, plus a column that repeats column 0 so copies join up.
     const cols = w + 1;
@@ -196,9 +414,17 @@ export class World3D {
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
     this.terrainGeo = geo;
+    this.water = [new THREE.Mesh(this.riverGeometry(water, hydro), this.riverMat), new THREE.Mesh(this.lakeGeometry(water, hydro), this.lakeMat)];
+    this.water[1].renderOrder = 2;
     this.terrain = [-1, 0, 1].map((k) => {
       const m = new THREE.Mesh(geo, this.terrainMat);
       m.position.x = k * w;
+      // Rivers and lakes ride on each copy; picking ignores them (it hits the terrain only).
+      for (const wm of this.water) {
+        const c = new THREE.Mesh(wm.geometry, wm.material);
+        c.renderOrder = wm.renderOrder;
+        m.add(c);
+      }
       this.scene.add(m);
       return m;
     });
@@ -236,6 +462,106 @@ export class World3D {
 
     this.fit();
     this.setFocus(this.focusRect);
+  }
+
+  /**
+   * Rivers as ribbons from each river tile's centre to the tile it drains into, wider
+   * where more water flows, laid just above the ground.
+   */
+  private riverGeometry(water: Float32Array, hydro: Hydrology) {
+    const { w } = this;
+    let minFlow = Infinity;
+    for (let i = 0; i < water.length; i++) if (water[i] === 3) minFlow = Math.min(minFlow, hydro.flow[i]);
+    const pos: number[] = [];
+    const STEPS = 4;
+    for (let i = 0; i < water.length; i++) {
+      const j = hydro.downstream[i];
+      if (water[i] !== 3 || j < 0) continue;
+      const x0 = (i % w) + 0.5;
+      const y0 = Math.floor(i / w) + 0.5;
+      let dx = (j % w) + 0.5 - x0;
+      dx -= Math.round(dx / w) * w;
+      const dy = Math.floor(j / w) + 0.5 - y0;
+      const len = Math.hypot(dx, dy) || 1;
+      const half = Math.min(0.3, 0.05 + 0.045 * Math.log2(hydro.flow[i] / minFlow + 1));
+      // Overlap the next segment by half a width so bends join up.
+      const ux = dx / len;
+      const uy = dy / len;
+      const sx = x0 - ux * half;
+      const sy = y0 - uy * half;
+      const ex = dx + 2 * ux * half;
+      const ey = dy + 2 * uy * half;
+      const nx = -uy * half;
+      const ny = ux * half;
+      const edge = (t: number, side: number): [number, number, number] => {
+        const px = sx + ex * t + nx * side;
+        const py = sy + ey * t + ny * side;
+        const ground = Math.max(this.heightAt(px, py), this.heightAt(sx + ex * t, sy + ey * t));
+        return [px, ground + 0.03, py];
+      };
+      for (let k = 0; k < STEPS; k++) {
+        const a = edge(k / STEPS, -1);
+        const b = edge(k / STEPS, 1);
+        const c = edge((k + 1) / STEPS, -1);
+        const d = edge((k + 1) / STEPS, 1);
+        pos.push(...a, ...c, ...b, ...b, ...c, ...d);
+      }
+    }
+    return flatGeometry(pos);
+  }
+
+  /** Lake surfaces: flat at each lake's level over every grid cell that touches the lake. */
+  private lakeGeometry(water: Float32Array, hydro: Hydrology) {
+    const { w, h } = this;
+    const pos: number[] = [];
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w; x++) {
+        let level = -Infinity;
+        for (const [cx, cy] of [
+          [x, y],
+          [(x + 1) % w, y],
+          [x, y + 1],
+          [(x + 1) % w, y + 1],
+        ]) {
+          const i = cy * w + cx;
+          if (water[i] === 2) level = Math.max(level, hydro.level[i]);
+        }
+        if (level === -Infinity) continue;
+        const ly = toHeight(level) + 0.01;
+        const [x0, x1, z0, z1] = [x + 0.5, x + 1.5, y + 0.5, y + 1.5];
+        pos.push(x0, ly, z0, x0, ly, z1, x1, ly, z0, x1, ly, z0, x0, ly, z1, x1, ly, z1);
+      }
+    }
+    return flatGeometry(pos);
+  }
+
+  /**
+   * Time of day and season from the engine's clock. Night falls only when time runs
+   * slowly enough to see it (up to about an hour per second, fading out by six); faster,
+   * or for the whole year at once, the light stays at a neutral day.
+   */
+  setClock(day: number, speed: number) {
+    const strength = speed <= 3600 ? 1 : speed >= 6 * 3600 ? 0 : 1 - Math.log(speed / 3600) / Math.log(6);
+    const t = day - Math.floor(day);
+    const az = t * Math.PI * 2;
+    // Sun height: below the horizon at midnight, highest at noon.
+    const elev = -Math.cos(az) * 0.9 + 0.1;
+    const daylight = THREE.MathUtils.smoothstep(elev, -0.15, 0.3);
+    const dusk = Math.exp(-((elev / 0.18) ** 2)) * strength;
+    const light = 1 - strength * (1 - daylight);
+    this.sun.intensity = 0.25 + 1.95 * light;
+    this.hemi.intensity = 0.75 + 0.85 * light;
+    // Rises in the east, south at noon, sets in the west.
+    // At night the faint light comes from high up, like moonlight.
+    const sunDir = new THREE.Vector3(Math.sin(az) * daylight, Math.max(0.08, elev, 1 - daylight), -Math.cos(az) * 0.5 * daylight).normalize();
+    this.sun.position.copy(DAY_SUN).normalize().lerp(sunDir, strength);
+    // Warm at dusk, cool blue at night.
+    const night = strength * (1 - daylight);
+    this.sun.color.setRGB(1 - 0.45 * night, 0.96 - 0.25 * dusk - 0.3 * night, 0.88 - 0.4 * dusk + 0.12 * night);
+    const sky = NIGHT_SKY.clone().lerp(DAY_SKY, light).lerp(DUSK_SKY, dusk * 0.6);
+    (this.scene.background as THREE.Color).copy(sky);
+    (this.scene.fog as THREE.Fog).color.copy(sky);
+    this.requestRender();
   }
 
   /** Colours draped over the terrain: one pixel per tile (biomes, a climate layer, ranges). */
@@ -277,9 +603,119 @@ export class World3D {
 
   // ---------------------------------------------------------------- life
 
-  setAnimals(pos: Float32Array | undefined, species: Uint32Array | undefined, actions: Uint8Array | undefined, colors: Map<number, RGB>) {
-    this.animalData = pos && species ? { pos, species, actions, colors } : null;
+  /** How far the current moves have got (0–1). */
+  private moveProgress(now: number) {
+    return Math.min(1, Math.max(0, (now - this.moveStart) / this.moveMs));
+  }
+
+  /** Row of an animal id in the current frame, or -1. */
+  private rowOf(id: number) {
+    const d = this.animalData;
+    if (!d?.ids) return -1;
+    if (d.index) return d.index.get(id) ?? -1;
+    return d.ids.indexOf(id);
+  }
+
+  /**
+   * The animals simulated one by one. With ids, each animal walks smoothly from where it
+   * is drawn now to its new position over the time between position updates, and faces
+   * the way it walks.
+   */
+  setAnimals(
+    pos: Float32Array | undefined,
+    species: Uint32Array | undefined,
+    actions: Uint8Array | undefined,
+    ids: Float64Array | undefined,
+    shape: Float32Array | undefined,
+    colors: Map<number, RGB>,
+  ) {
+    const prev = this.animalData;
+    if (!pos || !species) {
+      this.animalData = null;
+      this.lastSize = -1;
+      this.requestRender();
+      return;
+    }
+    const now = performance.now();
+    const n = species.length;
+    const a = this.moveProgress(now);
+    const smooth = !!ids && n <= ANIMATE_MAX;
+    const d: AnimalFrame = {
+      pos,
+      species,
+      actions,
+      ids,
+      shape,
+      colors,
+      fromX: new Float32Array(n),
+      fromY: new Float32Array(n),
+      heading: new Float32Array(n),
+      walkUntil: new Float64Array(n),
+      index: smooth ? new Map() : null,
+      scale: new Float32Array(n).fill(1),
+    };
+    let changed = !prev || prev.species.length !== n;
+    for (let i = 0; i < n; i++) {
+      const x = pos[2 * i];
+      const y = pos[2 * i + 1];
+      d.fromX[i] = x;
+      d.fromY[i] = y;
+      d.heading[i] = yawOf(ids ? ids[i] : i);
+      if (!smooth) continue;
+      const id = ids![i];
+      d.index!.set(id, i);
+      const j = prev?.index?.get(id);
+      if (j === undefined) {
+        changed = true;
+        continue;
+      }
+      d.heading[i] = prev!.heading[j];
+      d.walkUntil[i] = prev!.walkUntil[j];
+      const [cx, cy] = drawnAt(prev!, j, a);
+      let dx = x - cx;
+      dx -= Math.round(dx / this.w) * this.w;
+      const dy = y - cy;
+      const step = Math.abs(dx) + Math.abs(dy);
+      if (step > MAX_STEP) continue;
+      d.fromX[i] = x - dx;
+      d.fromY[i] = y - dy;
+      if (prev!.pos[2 * j] !== x || prev!.pos[2 * j + 1] !== y) {
+        changed = true;
+        if (step > 1e-4) {
+          d.heading[i] = Math.atan2(-dy, dx);
+          d.walkUntil[i] = now + Math.max(600, this.moveMs * 1.5);
+        }
+      }
+      if (actions?.[i] === 0) d.walkUntil[i] = 0;
+    }
+    if (smooth && prev?.index && !changed) {
+      // Nothing moved (paused, or between engine steps): let the current moves finish.
+      d.fromX = prev.fromX;
+      d.fromY = prev.fromY;
+      d.heading = prev.heading;
+      d.walkUntil = prev.walkUntil;
+    } else if (changed) {
+      // Moves last as long as the time between position updates, so walking looks continuous.
+      if (this.lastMoveAt) this.moveMs += (Math.min(1000, Math.max(30, now - this.lastMoveAt)) - this.moveMs) * 0.5;
+      this.lastMoveAt = now;
+      this.moveStart = now;
+    }
+    if (shape) {
+      // Body length from mass, relative to the frame's typical animal (geometric mean).
+      let logSum = 0;
+      for (let i = 0; i < n; i++) logSum += Math.log(Math.max(1e-3, shape[4 * i]));
+      const ref = Math.exp(logSum / Math.max(1, n));
+      for (let i = 0; i < n; i++) d.scale[i] = Math.min(1.6, Math.max(0.7, Math.cbrt(Math.max(1e-3, shape[4 * i]) / ref)));
+    }
+    this.animalData = d;
     this.lastSize = -1;
+    this.requestRender();
+  }
+
+  /** Keep the camera on an animal (null stops); `onFollowLost` fires if it disappears. */
+  follow(id: number | null) {
+    this.followId = id;
+    if (id !== null) this.userMoved = true;
     this.requestRender();
   }
 
@@ -298,6 +734,7 @@ export class World3D {
     const d = this.herdData;
     if (!d) {
       if (this.bars) this.bars.count = 0;
+      this.herdSprites.hide();
       return;
     }
     const { w, h } = this;
@@ -309,15 +746,23 @@ export class World3D {
     }
     if (n === 0) {
       if (this.bars) this.bars.count = 0;
+      this.herdSprites.hide();
       return;
     }
     const lmax = Math.log1p(max) || 1;
     const per = d.heat ? 1 : 4;
-    // Herds are many and approximate, so they always use the simple body.
-    const geo = d.heat ? this.barGeo : this.simpleGeo;
+    // Herds are many and approximate, so they use the simple body, or sprites when there are very many.
+    const sprites = !d.heat && n * 2.5 > SPRITE_MIN;
+    if (sprites) {
+      if (this.bars) this.bars.count = 0;
+      this.herdSprites.reserve(n * per);
+    } else {
+      this.herdSprites.hide();
+    }
+    const geo = d.heat ? this.barGeo : this.herdGeo;
     // Reuse the mesh while it fits: density arrives every frame and reallocating stalls rendering.
     let bars = this.bars;
-    if (!bars || bars.geometry !== geo || bars.instanceMatrix.count < n * per) {
+    if (!sprites && (!bars || bars.geometry !== geo || bars.instanceMatrix.count < n * per)) {
       if (bars) {
         this.scene.remove(bars);
         bars.dispose();
@@ -347,8 +792,8 @@ export class World3D {
         c.setRGB(col[0] / 255, col[1] / 255, col[2] / 255, THREE.SRGBColorSpace);
         if (d.heat) {
           m.makeScale(1, 0.1 + 1.6 * t, 1).setPosition(this.nearest(x + 0.5), Math.max(0, this.heights[i]), y + 0.5);
-          bars.setMatrixAt(k, m);
-          bars.setColorAt(k++, c);
+          bars!.setMatrixAt(k, m);
+          bars!.setColorAt(k++, c);
           continue;
         }
         // Animals inside the watched region are drawn individually.
@@ -358,14 +803,23 @@ export class World3D {
           const r = yawOf(i * 4 + j);
           const px = x + 0.5 + 0.35 * Math.cos(r * 1.7 + j);
           const py = y + 0.5 + 0.35 * Math.sin(r * 2.3 + j);
+          if (sprites) {
+            this.herdSprites.set(k++, this.nearest(px), this.heightAt(px, py) + size * 0.42, py, c);
+            continue;
+          }
           q.setFromAxisAngle(up, r);
           sc.setScalar(size);
           p.set(this.nearest(px), this.heightAt(px, py), py);
-          bars.setMatrixAt(k, m.compose(p, q, sc));
-          bars.setColorAt(k++, c);
+          bars!.setMatrixAt(k, m.compose(p, q, sc));
+          bars!.setColorAt(k++, c);
         }
       }
     }
+    if (sprites) {
+      this.herdSprites.commit(k, size);
+      return;
+    }
+    bars = bars!;
     bars.count = k;
     bars.instanceMatrix.needsUpdate = true;
     if (bars.instanceColor) bars.instanceColor.needsUpdate = true;
@@ -383,8 +837,10 @@ export class World3D {
     this.requestRender();
   }
 
-  setSelected(p: { x: number; y: number } | null) {
+  /** The inspected animal: its last reported position, and its id to track it smoothly. */
+  setSelected(p: { x: number; y: number } | null, id: number | null = null) {
     this.selected = p;
+    this.selectedId = p ? id : null;
     this.requestRender();
   }
 
@@ -461,6 +917,10 @@ export class World3D {
 
   pan(dx: number, dz: number) {
     this.userMoved = true;
+    if (this.followId !== null) {
+      this.followId = null;
+      this.onFollowLost?.();
+    }
     this.cam.tx += dx;
     this.cam.ty += dz;
     return this.clampCamera();
@@ -558,73 +1018,136 @@ export class World3D {
   }
 
   /** Lay out the animals: drawn on the world copy nearest the camera, sized to stay visible. */
-  private layoutAnimals(size: number) {
+  private layoutAnimals(size: number, detailed: boolean, now: number) {
     const d = this.animalData;
     if (!d) {
       if (this.animals) this.animals.count = 0;
+      this.animalSprites.hide();
       return;
     }
     const n = d.species.length;
+    const a = this.moveProgress(now);
+    const c = new THREE.Color();
+    const colorOf = (i: number) => {
+      const col = d.colors.get(d.species[i]) ?? [255, 255, 255];
+      c.setRGB(col[0] / 255, col[1] / 255, col[2] / 255, THREE.SRGBColorSpace);
+      // Coat luminance lightens or darkens the species colour a little.
+      if (d.shape) c.multiplyScalar(0.7 + 0.6 * d.shape[4 * i + 3]);
+      return c;
+    };
+    if (n > SPRITE_MIN && !detailed) {
+      if (this.animals) this.animals.count = 0;
+      this.animalSprites.reserve(n);
+      for (let i = 0; i < n; i++) {
+        const [x, y] = drawnAt(d, i, a);
+        this.animalSprites.set(i, this.nearest(x), this.heightAt(x, y) + size * d.scale[i] * 0.42, y, colorOf(i));
+      }
+      this.animalSprites.commit(n, size);
+      return;
+    }
+    this.animalSprites.hide();
     if (!this.animals || this.animals.instanceMatrix.count < n) {
       if (this.animals) {
         this.scene.remove(this.animals);
         this.animals.dispose();
       }
-      this.animals = new THREE.InstancedMesh(this.animalGeo, this.animalMat, Math.max(256, Math.ceil(n * 1.3)));
+      const cap = Math.max(256, Math.ceil(n * 1.3));
+      this.shapeAttr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+      this.animalGeo.setAttribute("aShape", this.shapeAttr);
+      this.simpleGeo.setAttribute("aShape", this.shapeAttr);
+      this.animals = new THREE.InstancedMesh(this.animalGeo, this.animalMat, cap);
       this.animals.frustumCulled = false;
       this.scene.add(this.animals);
     }
     const mesh = this.animals;
+    const shape = this.shapeAttr!;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
     const p = new THREE.Vector3();
     const up = new THREE.Vector3(0, 1, 0);
-    const c = new THREE.Color();
     for (let i = 0; i < n; i++) {
-      const x = this.nearest(d.pos[2 * i]);
-      const y = d.pos[2 * i + 1];
+      const [x, y] = drawnAt(d, i, a);
       const resting = d.actions?.[i] === 0;
-      q.setFromAxisAngle(up, yawOf(i));
-      s.set(size, resting ? size * 0.55 : size, size);
-      p.set(x, this.heightAt(d.pos[2 * i], y), y);
+      const k = size * d.scale[i];
+      q.setFromAxisAngle(up, d.heading[i]);
+      s.set(k, resting ? k * 0.55 : k, k);
+      p.set(this.nearest(x), this.heightAt(x, y), y);
       mesh.setMatrixAt(i, m.compose(p, q, s));
-      const col = d.colors.get(d.species[i]) ?? [255, 255, 255];
-      mesh.setColorAt(i, c.setRGB(col[0] / 255, col[1] / 255, col[2] / 255, THREE.SRGBColorSpace));
+      mesh.setColorAt(i, colorOf(i));
+      // Leg length (tempered so extremes stay readable), ornament, and gait phase while walking.
+      const legs = d.shape ? Math.min(1.6, Math.max(0.65, Math.sqrt(d.shape[4 * i + 1]))) : 1;
+      const ornament = d.shape ? Math.min(1, d.shape[4 * i + 2] * 1.3) : 0.4;
+      const gait = d.walkUntil[i] > now ? 1 + (((d.ids ? d.ids[i] : i) * 0.618) % 1) * 0.98 : 0;
+      shape.setXYZW(i, legs, ornament, 0, gait);
     }
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    shape.needsUpdate = true;
   }
 
   render() {
+    const now = performance.now();
+    this.time.value = now / 1000;
+    const d = this.animalData;
+    const a = this.moveProgress(now);
+    const followRow = this.followId !== null ? this.rowOf(this.followId) : -1;
+    if (this.followId !== null) {
+      if (followRow < 0) {
+        this.followId = null;
+        this.onFollowLost?.();
+      } else {
+        const [x, y] = drawnAt(d!, followRow, a);
+        this.cam.tx = x;
+        this.cam.ty = y;
+        this.cam.tx -= Math.floor(this.cam.tx / this.w) * this.w;
+      }
+    }
     this.updateCamera();
     const upp = this.unitsPerPixel();
     // Bodies are at least ~9 px long so a herd stays visible from far away.
     const size = Math.min(4, Math.max(0.12, 9 * upp));
+    const detailed = size / upp >= DETAIL_PX;
+    const moving = !!d?.index && a < 1;
     const moved = !(Math.abs(this.cam.tx - this.layoutTx) < this.w / 8);
     if (moved || this.lastSize < 0 || Math.abs(size - this.lastSize) > this.lastSize * 0.05) {
-      this.layoutAnimals(size);
+      this.layoutAnimals(size, detailed, now);
       this.layoutHerds(size);
       this.lastSize = size;
       this.layoutTx = this.cam.tx;
+    } else if (moving) {
+      this.layoutAnimals(this.lastSize, detailed, now);
     }
-    if (this.animals) this.animals.geometry = size / upp >= DETAIL_PX ? this.animalGeo : this.simpleGeo;
+    if (this.animals) this.animals.geometry = detailed ? this.animalGeo : this.simpleGeo;
     this.placeBox(this.focusBox, this.focusRect, true);
-    if (this.selected) {
+    const selRow = this.selectedId !== null ? this.rowOf(this.selectedId) : -1;
+    const sel = selRow >= 0 ? drawnAt(d!, selRow, a) : this.selected ? [this.selected.x, this.selected.y] : null;
+    if (sel) {
       const r = Math.max(0.25, 14 * upp);
       this.selection.visible = true;
-      this.selection.position.set(this.nearest(this.selected.x), this.heightAt(this.selected.x, this.selected.y) + 0.02, this.selected.y);
+      this.selection.position.set(this.nearest(sel[0]), this.heightAt(sel[0], sel[1]) + 0.02, sel[1]);
       this.selection.scale.setScalar(r);
     } else {
       this.selection.visible = false;
     }
     this.renderer.render(this.scene, this.camera);
+    // Keep drawing while animals walk: positions ease between updates and legs swing.
+    let walking = false;
+    if (d && detailed && this.animals?.count) {
+      for (let i = 0; i < d.walkUntil.length && !walking; i++) walking = d.walkUntil[i] > now;
+    }
+    if (moving || walking) this.requestRender();
   }
 
   dispose() {
     this.disposed = true;
     this.terrainGeo?.dispose();
+    for (const m of this.water) m.geometry.dispose();
+    this.animalSprites.dispose();
+    this.herdSprites.dispose();
+    this.spriteTex.dispose();
+    this.herdGeo.dispose();
     this.terrainTex?.dispose();
     this.animals?.dispose();
     this.animalGeo.dispose();

@@ -733,3 +733,37 @@ fn focus_region_clamps_to_the_map() {
     assert!(f.0 < f.2 && f.1 < f.3);
     assert!(f.2 <= s.world.w as u32 && f.3 <= s.world.h as u32);
 }
+
+/// The hydrology layers the 3D view draws water from: every river runs downhill
+/// into a river, lake or the sea, and a lake's surface is above its bed.
+#[test]
+fn river_and_lake_layers_are_consistent() {
+    let s = Simulation::new(NewWorld {
+        template: "earth".into(),
+        seed: 37,
+        gen: None,
+        founders: Some(vec![]),
+        realism: None,
+    })
+    .unwrap();
+    let water = s.layer("water");
+    let flow = s.layer("river_flow");
+    let down = s.layer("downstream");
+    let level = s.layer("water_level");
+    let elevation = s.layer("elevation");
+    let mut rivers = 0;
+    for i in 0..water.len() {
+        if water[i] == 3.0 {
+            rivers += 1;
+            let d = down[i];
+            assert!(d >= 0.0, "river tile {i} has no outlet");
+            let d = d as usize;
+            assert!(water[d] != 0.0, "river tile {i} drains onto dry land");
+            assert!(flow[d] >= flow[i]);
+        }
+        if water[i] == 2.0 {
+            assert!(level[i] > elevation[i]);
+        }
+    }
+    assert!(rivers > 0);
+}

@@ -23,7 +23,10 @@ impl Ord for Cell {
     }
 }
 
-pub fn compute(world: &mut World) {
+/// Priority-flood over the terrain from the outlets. Returns the filled surface
+/// (a lake tile's value is its water level), each tile's D8 downstream tile
+/// (`usize::MAX` at outlets) and the tiles in processing order (downstream first).
+pub fn priority_flood(world: &World) -> (Vec<f32>, Vec<usize>, Vec<usize>) {
     let (w, h) = (world.w, world.h);
     let n = w * h;
     let mut filled = world.elevation.clone();
@@ -60,6 +63,12 @@ pub fn compute(world: &mut World) {
             }
         }
     }
+    (filled, downstream, order)
+}
+
+pub fn compute(world: &mut World) {
+    let n = world.w * world.h;
+    let (filled, downstream, order) = priority_flood(world);
 
     // Lakes: land tiles flooded more than 2 m by the fill.
     for i in 0..n {

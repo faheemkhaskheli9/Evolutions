@@ -165,6 +165,25 @@ impl Engine {
         self.sim.animals.iter().map(|a| a.action as u8).collect()
     }
 
+    /// Animal ids, in the same order as `positions` (f64 holds ids exactly up to 2^53).
+    pub fn frame_ids(&self) -> Vec<f64> {
+        self.sim.animals.iter().map(|a| a.id as f64).collect()
+    }
+
+    /// Body shape per animal for drawing, four values each: current mass (kg), leg
+    /// length index, ornament size (0–1) and coat luminance (0–1).
+    pub fn frame_shape(&self) -> Vec<f32> {
+        use evo_engine::traits::Trait;
+        let mut v = Vec::with_capacity(self.sim.animals.len() * 4);
+        for a in &self.sim.animals {
+            v.push(a.mass);
+            v.push(a.pheno.get(Trait::LegLength));
+            v.push(a.pheno.get(Trait::Ornament));
+            v.push(a.pheno.get(Trait::CoatLuminance));
+        }
+        v
+    }
+
     /// Latest Population-mode vital rates per deme (for the "why" panel).
     pub fn diagnostics(&self) -> String {
         serde_json::to_string(
