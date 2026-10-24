@@ -306,6 +306,41 @@ fn save_load_round_trip_continues_identically() {
     assert_eq!(a.state_hash(), b.state_hash());
 }
 
+/// Rewind (PRD FR-T6): checkpoints are saves taken along a run, including just before
+/// an intervention and across a mode switch. Loading any of them and repeating the
+/// same actions reaches the same state as the original run.
+#[test]
+fn rewinding_to_a_checkpoint_reproduces_the_run() {
+    use evo_engine::Intervention;
+    // The run's actions, in order; a checkpoint is taken before each.
+    let actions: [fn(&mut Simulation); 5] = [
+        |s| s.run_steps(24 * 6),
+        |s| s.set_mode(Mode::Population).unwrap(),
+        |s| s.run_years(4.0),
+        |s| {
+            s.apply(Intervention::ClimateShift { delta_c: -2.0 })
+                .unwrap()
+        },
+        |s| s.run_years(4.0),
+    ];
+    let mut original = blank(11);
+    let mut checkpoints = Vec::new();
+    for act in &actions {
+        checkpoints.push(original.save_bytes().unwrap());
+        act(&mut original);
+    }
+    assert!(original.population() > 0);
+    let end = original.state_hash();
+    for (i, bytes) in checkpoints.iter().enumerate() {
+        let mut rewound = Simulation::load_bytes(bytes).unwrap();
+        for act in &actions[i..] {
+            act(&mut rewound);
+        }
+        assert_eq!(rewound.state_hash(), end, "rewound to checkpoint {i}");
+        assert_eq!(rewound.events.len(), original.events.len());
+    }
+}
+
 /// Population mode reuses patch contexts between years; a climate shift or a new
 /// habitat area must rebuild them. A save has no cache, so a loaded copy is the
 /// reference: it must continue exactly like the original after each change.

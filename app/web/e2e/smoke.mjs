@@ -81,6 +81,30 @@ try {
     const badge = await page.locator(".badge").textContent();
     if (!badge.includes("Population")) throw new Error(`mode ${badge}`);
   });
+  await step("rewind to a checkpoint repeats the run", async () => {
+    const hash = () => page.evaluate(() => window.__evoHash());
+    const jump100 = async () => {
+      const target = (await hash()).year + 100;
+      await page.getByRole("button", { name: "+100 yr" }).click();
+      // The overlay may come and go between checks, so wait for the year instead.
+      for (let t = 0; (await hash()).year < target; t++) {
+        if (t > 600) throw new Error("jump did not finish");
+        await page.waitForTimeout(200);
+      }
+      await page.getByText("Fast-forwarding…").waitFor({ state: "detached", timeout: 30000 });
+    };
+    await jump100();
+    const original = await hash();
+    // The checkpoint taken just before that jump.
+    const marks = page.getByRole("button", { name: /^Rewind to year .* \(before a jump\)$/ });
+    await marks.last().click();
+    await page.getByText(/^Rewound to year/).waitFor({ timeout: 20000 });
+    const back = await hash();
+    if (!(back.year < original.year - 99)) throw new Error(`rewound to year ${back.year}, ran to ${original.year}`);
+    await jump100();
+    const again = await hash();
+    if (again.year !== original.year || again.hash !== original.hash) throw new Error(`rewound run differs: ${JSON.stringify(again)} vs ${JSON.stringify(original)}`);
+  });
   await step("species panel shows history", async () => {
     await page.getByRole("tab", { name: "Species" }).click();
     await page.getByText("Population", { exact: true }).first().waitFor();
@@ -145,6 +169,16 @@ try {
       });
   });
   await step("climate intervention is logged", async () => {
+    await page.getByRole("button", { name: "-2 °C" }).click();
+    await page.getByRole("tab", { name: /Chronicle/ }).click();
+    await page.getByText(/Climate shift/).first().waitFor();
+  });
+  await step("go to just before an event", async () => {
+    await page.getByRole("button", { name: /^Go to just before: Climate shift/ }).first().click();
+    await page.getByText(/^Rewound to year/).waitFor({ timeout: 20000 });
+    await page.getByText(/Climate shift/).first().waitFor({ state: "detached", timeout: 5000 });
+    // Apply it again so the later steps see it.
+    await page.getByRole("tab", { name: "World" }).click();
     await page.getByRole("button", { name: "-2 °C" }).click();
     await page.getByRole("tab", { name: /Chronicle/ }).click();
     await page.getByText(/Climate shift/).first().waitFor();

@@ -10,6 +10,8 @@ import { Inspector } from "./components/Inspector";
 import { WorldPanel } from "./components/WorldPanel";
 import { NewWorldDialog } from "./components/NewWorldDialog";
 import { RunUntil } from "./components/RunUntil";
+import { Timeline } from "./components/Timeline";
+import type { CheckpointInfo } from "./engine/checkpoints";
 import { describeSpeed, downloadBlob, formatDate, formatYears, SPEEDS, type RGB } from "./util";
 
 // three.js is large; load it only when the 3D view is shown.
@@ -48,6 +50,7 @@ export default function App() {
   const [speed, setSpeed] = useState(SPEEDS[1].value);
   const [species, setSpecies] = useState<SpeciesInfo[]>([]);
   const [events, setEvents] = useState<SimEvent[]>([]);
+  const [checkpoints, setCheckpoints] = useState<{ list: CheckpointInfo[]; bytes: number; budget: number }>({ list: [], bytes: 0, budget: 0 });
   const [tab, setTab] = useState<Tab>("species");
   const [selectedSpecies, setSelectedSpecies] = useState<number | null>(null);
   const [detail, setDetail] = useState<{ id: number; traits: TraitRow[]; metrics: Sample[] } | null>(null);
@@ -185,6 +188,9 @@ export default function App() {
           for (const f of m.files) downloadBlob(f.text, f.name, f.mime);
           if (m.files.length > 1) notify(`Exported ${m.files.length} files.`);
           break;
+        case "checkpoints":
+          setCheckpoints({ list: m.list, bytes: m.bytes, budget: m.budget });
+          break;
         case "replayScript":
           downloadBlob(m.text, `evolutions-replay-${Date.now()}.json`, "application/json");
           notify("Replay log exported. Open it to replay the run.");
@@ -203,6 +209,19 @@ export default function App() {
       client.terminate();
     };
   }, [client, notify]);
+
+  // Test hook: the state hash, to check that a rewound run repeats the original.
+  useEffect(() => {
+    (window as unknown as { __evoHash: unknown }).__evoHash = () =>
+      new Promise((resolve) => {
+        const off = client.on((m) => {
+          if (m.type !== "hash") return;
+          off();
+          resolve({ year: m.year, hash: m.hash });
+        });
+        client.send({ type: "hash" });
+      });
+  }, [client]);
 
   // Keep the inspector and species detail fresh while time runs.
   useEffect(() => {
@@ -484,6 +503,7 @@ export default function App() {
               <EventsPanel
                 events={events}
                 species={species}
+                onRewindBefore={progress ? undefined : (index) => client.send({ type: "rewindBefore", event: index })}
                 onSelectSpecies={(id) => {
                   setSelectedSpecies(id);
                   setTab("species");
@@ -568,6 +588,16 @@ export default function App() {
           ))}
           <RunUntil catalog={catalog} species={species} disabled={!world || !!progress} onRun={(years, until) => client.send({ type: "jump", years, until })} />
         </div>
+        {world && (
+          <Timeline
+            checkpoints={checkpoints.list}
+            bytes={checkpoints.bytes}
+            budget={checkpoints.budget}
+            year={status?.year ?? 0}
+            disabled={!!progress}
+            onRewind={(id) => client.send({ type: "rewind", id })}
+          />
+        )}
       </footer>
 
       {progress && (
