@@ -99,3 +99,30 @@ The user guide is updated to match (speed presets, mode overrides, regions acros
 - **CLI:** `--csv` now uses the shared writer, so its files gain the SD columns after the existing mean columns. New `--chronicle <file>` and `--settings <file>`.
 - **App:** **Export data** in the World tab downloads the time series (all species or one), the Chronicle, the Newick tree and the settings, through new `evo-wasm` methods (`species_csv_files`, `chronicle_csv`, `settings_json`).
 - **Tests:** `evo-cli/tests/export.rs` runs `evo run --load … --years 0` with every export option and checks each file is byte-identical to what the engine returns for the same save (what the app downloads), and checks the headers. Vitest covers `exportFiles` in `protocol.ts`; the e2e smoke test downloads each file and checks its header.
+
+## Phase 8: Faster Population-mode core (done, #14)
+
+Benchmark: `evo run --template earth --seed 1 --years 300 --mode population`, release build, median of 5 runs, the old and new binaries run alternately on the same machine.
+
+| | Before | After |
+|---|---|---|
+| Wall time | 3.22 s | 2.49 s (−23%; −26% against the 3.35 s measured in Phase 3) |
+| Instructions (callgrind) | 29.6 G | 14.3 G (−52%) |
+
+Wall time falls less than the instruction count because what is left is mostly memory access (allele tables, deme pools) and `libm` calls.
+
+**Changes that keep fixed-seed results bit-for-bit.** With the old random draws put back, the CSV, Chronicle, Newick and `.evo` outputs of a 300-year Population run and a 30-year Auto run are byte-identical to the previous engine.
+- **Selection gradient:** fitness doesn't read 5 traits (boldness, sociality, preference, choosiness, dispersal), so their gradient is exactly 0 and is not computed (`FITNESS_NEUTRAL`). For the others, only the perturbed trait's transform is recomputed. When that trait isn't body mass, the mass powers (`MassTerms`) are reused. When it is one of the 6 traits the heat balance doesn't read (`HEAT_NEUTRAL`), the deme's 24-step thermal year (`year_heat`) is reused too. Unit tests check that each shortcut gives bit-identical fitness.
+- **`derive`:** `kleiber_w` and `adult^0.25` are computed once instead of 3 and 2 times. Newborns' cold/heat stress uses `derive_thermal`, which computes only the four fields `thermal` reads. `annual` takes the adult's `Derived` instead of recomputing it. The prey cap reuses the fed-to-capacity fecundity already worked out for each deme.
+- **Vegetation:** `grow_vegetation_year` skips tiles whose yearly cycle has reached a bit-exact fixed point. The flags are cleared when the climate changes (`revision`), in Individual mode, and when an event zeroes stocks. They are not saved, so they are rebuilt after loading. Vegetation fell from ~13% of instructions to under 1%.
+- **`merge_sorted`:** merges into a reused buffer. When both pools carry the same alleles (the usual case), it averages them in place.
+- **Allele frequencies:** deme mean latents are computed once per year, not twice.
+
+**Changes to the random stream** (`MODEL_VERSION` 3, save layout unchanged):
+- `Rng::binomial` for n ≤ 64 uses inversion: one uniform draw, walking up the pmf, instead of n draws. `Rng::poisson` for λ < 30 also uses inversion instead of Knuth's product of uniforms. Both are exact samplers of the same distributions.
+- The normal approximations in `binomial` and `poisson` use Marsaglia's polar method instead of Box–Muller (no `cos`). `Rng::normal` itself is unchanged.
+- In Wright–Fisher resampling, the last allele takes the remaining copies instead of drawing `Binomial(left, ≈1)`.
+
+Effect on results: same distributions, different draws. So fixed-seed runs differ in detail, in both modes (Poisson draws are also used for mutation in meiosis). On `earth`, seeds 1–8, 300 years, the outcomes are alike. In each version 3 of 24 species go extinct: the deer in seeds 1 and 4 and the wolf in seed 7 before, the deer in seed 4 and the wolf in seeds 6 and 7 after. Final hare and wolf numbers and body masses fall in the same ranges. Seed 1's deer, which died out in year 162, now hangs on with 9 animals. The validation suite passes, including the `--ignored` long tests. New unit tests check the small-n binomial against its pmf, the moments of the polar normal, and `merge_sorted` against a plain merge.
+
+**Not done:** `Rng::binomial` (~22% of instructions, mostly the normal approximation in Wright–Fisher resampling) and the deme mean latents (~8%, also recomputed by `record_metrics`) are now the largest costs. Multi-threading is #15.

@@ -106,6 +106,19 @@ impl Rng {
         (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
     }
 
+    /// Standard normal via Marsaglia's polar method: no trigonometry, so cheaper than
+    /// `normal` where many draws are needed (binomial and Poisson approximations).
+    fn normal_polar(&mut self) -> f64 {
+        loop {
+            let u = 2.0 * self.f64() - 1.0;
+            let v = 2.0 * self.f64() - 1.0;
+            let s = u * u + v * v;
+            if s > 0.0 && s < 1.0 {
+                return u * (-2.0 * s.ln() / s).sqrt();
+            }
+        }
+    }
+
     pub fn normal_f32(&mut self, mean: f32, sd: f32) -> f32 {
         mean + sd * self.normal() as f32
     }
@@ -116,25 +129,27 @@ impl Rng {
             return 0;
         }
         if lambda < 30.0 {
-            // Knuth multiplication method.
-            let l = (-lambda).exp();
+            // Inversion: one uniform draw, walking up the cumulative distribution.
+            let mut f = (-lambda).exp();
+            let mut u = self.f64();
             let mut k = 0u64;
-            let mut p = 1.0;
-            loop {
-                p *= self.f64();
-                if p <= l {
-                    return k;
-                }
+            while u >= f {
+                u -= f;
                 k += 1;
+                f *= lambda / k as f64;
+                if f <= 0.0 {
+                    break;
+                }
             }
+            return k;
         }
         // Normal approximation with continuity correction.
-        let x = lambda + lambda.sqrt() * self.normal() + 0.5;
+        let x = lambda + lambda.sqrt() * self.normal_polar() + 0.5;
         x.max(0.0).floor() as u64
     }
 
-    /// Binomial(n, p). Exact for n ≤ 64; Poisson approximation for small expected
-    /// counts; normal approximation otherwise.
+    /// Binomial(n, p). Exact (by inversion, one uniform draw) for n ≤ 64; Poisson
+    /// approximation for small expected counts; normal approximation otherwise.
     pub fn binomial(&mut self, n: u64, p: f64) -> u64 {
         if n == 0 || p <= 0.0 {
             return 0;
@@ -147,11 +162,17 @@ impl Rng {
         }
         let mean = n as f64 * p;
         if n <= 64 {
-            let mut k = 0;
-            for _ in 0..n {
-                if self.f64() < p {
-                    k += 1;
-                }
+            // f = P(X = k), from P(X = 0) = qⁿ via f(k) = f(k-1)·(n-k+1)/k·p/q.
+            let q = 1.0 - p;
+            let s = p / q;
+            let a = (n + 1) as f64 * s;
+            let mut f = q.powi(n as i32);
+            let mut u = self.f64();
+            let mut k = 0u64;
+            while u >= f && k < n {
+                u -= f;
+                k += 1;
+                f *= a / k as f64 - s;
             }
             return k;
         }
@@ -160,7 +181,7 @@ impl Rng {
             return self.poisson(mean).min(n);
         }
         let sd = (mean * (1.0 - p)).sqrt();
-        let x = (mean + sd * self.normal() + 0.5).floor();
+        let x = (mean + sd * self.normal_polar() + 0.5).floor();
         x.clamp(0.0, n as f64) as u64
     }
 
@@ -198,7 +219,14 @@ mod tests {
     #[test]
     fn binomial_mean_and_variance() {
         let mut r = Rng::new(7);
-        for &(n, p) in &[(50u64, 0.3f64), (1000, 0.01), (5000, 0.4)] {
+        for &(n, p) in &[
+            (50u64, 0.3f64),
+            (10, 0.05),
+            (64, 0.5),
+            (3, 0.9),
+            (1000, 0.01),
+            (5000, 0.4),
+        ] {
             let k = 20000;
             let xs: Vec<f64> = (0..k).map(|_| r.binomial(n, p) as f64).collect();
             let m = xs.iter().sum::<f64>() / k as f64;
@@ -211,12 +239,41 @@ mod tests {
     }
 
     #[test]
+    fn polar_normal_moments() {
+        let mut r = Rng::new(9);
+        let k = 100_000;
+        let xs: Vec<f64> = (0..k).map(|_| r.normal_polar()).collect();
+        let m = xs.iter().sum::<f64>() / k as f64;
+        let v = xs.iter().map(|x| (x - m).powi(2)).sum::<f64>() / k as f64;
+        let tail = xs.iter().filter(|x| x.abs() > 1.96).count() as f64 / k as f64;
+        assert!(m.abs() < 0.02 && (v - 1.0).abs() < 0.02, "{m} {v}");
+        assert!((tail - 0.05).abs() < 0.004, "{tail}");
+    }
+
+    #[test]
     fn poisson_mean() {
         let mut r = Rng::new(3);
-        for &l in &[0.5f64, 4.0, 80.0] {
+        for &l in &[0.5f64, 4.0, 25.0, 80.0] {
             let k = 20000;
             let m = (0..k).map(|_| r.poisson(l) as f64).sum::<f64>() / k as f64;
             assert!((m - l).abs() < 0.05 * l.max(1.0));
+        }
+    }
+
+    #[test]
+    fn small_binomial_matches_pmf() {
+        let mut r = Rng::new(11);
+        let (n, p) = (12u64, 0.2f64);
+        let draws = 200_000;
+        let mut counts = [0u32; 13];
+        for _ in 0..draws {
+            counts[r.binomial(n, p) as usize] += 1;
+        }
+        let mut pmf = (1.0 - p).powi(n as i32);
+        for (k, &c) in counts.iter().enumerate() {
+            let got = c as f64 / draws as f64;
+            assert!((got - pmf).abs() < 0.004, "P(X={k}) {got} vs {pmf}");
+            pmf *= (n - k as u64) as f64 / (k + 1) as f64 * p / (1.0 - p);
         }
     }
 }

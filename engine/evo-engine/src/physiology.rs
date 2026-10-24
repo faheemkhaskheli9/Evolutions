@@ -81,41 +81,94 @@ pub fn locomotion_kj(mass_kg: f32, distance_m: f32) -> f32 {
 }
 
 pub fn derive(p: &Phenotype, mass_kg: f32) -> Derived {
-    let adult = p.get(Trait::BodyMass);
-    let m = mass_kg.max(0.005);
-    let ins = p.get(Trait::Insulation);
-    let app = p.get(Trait::Appendage);
+    derive_with(p, &MassTerms::new(mass_kg, p.get(Trait::BodyMass)))
+}
+
+/// The powers of current and adult body mass that `derive` uses. They are the costly
+/// part of `derive`, so callers evaluating many phenotypes of the same mass (the
+/// Population-mode selection gradient) compute them once.
+#[derive(Clone, Copy, Debug)]
+pub struct MassTerms {
+    m: f32,
+    adult: f32,
+    kleiber: f32,
+    hirt: f32,
+    m_05: f32,
+    m_01: f32,
+    m_08: f32,
+    m_015: f32,
+    adult_q: f32,
+    adult_m02: f32,
+}
+
+impl MassTerms {
+    pub fn new(mass_kg: f32, adult: f32) -> MassTerms {
+        let m = mass_kg.max(0.005);
+        MassTerms {
+            m,
+            adult,
+            kleiber: kleiber_w(m),
+            hirt: hirt_vmax_kmh(m),
+            m_05: m.powf(0.5),
+            m_01: m.powf(0.1),
+            m_08: m.powf(0.8),
+            m_015: m.powf(0.15),
+            adult_q: adult.powf(0.25),
+            adult_m02: adult.powf(-0.2),
+        }
+    }
+}
+
+/// `derive(p, mass)` given `mt = MassTerms::new(mass, adult mass of p)`.
+pub fn derive_with(p: &Phenotype, mt: &MassTerms) -> Derived {
+    debug_assert_eq!(mt.adult.to_bits(), p.get(Trait::BodyMass).to_bits());
+    let (m, adult) = (mt.m, mt.adult);
     let sprint = p.get(Trait::Sprint);
     let pace = p.get(Trait::Pace);
     let diet = p.get(Trait::Diet);
     let litter = p.get(Trait::LitterSize);
-    let bmr_w = kleiber_w(m) * maintenance_multiplier(p);
-    // Thermal conductance scales ~M^0.5; insulation lowers it, appendages raise it (Allen's rule).
-    let c_min = 0.27 * m.powf(0.5) / (0.5 + 2.0 * ins) * app.powf(0.3);
-    let c_max = c_min * (2.5 + 3.5 * p.get(Trait::HeatTolerance)) * app.powf(0.7);
-    let vmax = hirt_vmax_kmh(m) * (0.75 + 0.5 * sprint) * p.get(Trait::LegLength).powf(0.5);
-    let gestation = 30.0 * adult.powf(0.25) * pace.powf(0.6);
+    let kw = mt.kleiber;
+    let vmax = mt.hirt * (0.75 + 0.5 * sprint) * p.get(Trait::LegLength).powf(0.5);
+    let gestation = 30.0 * mt.adult_q * pace.powf(0.6);
     Derived {
-        bmr_w,
-        c_min,
-        c_max,
-        evap_cap_w: (0.5 + 2.5 * p.get(Trait::HeatTolerance)) * kleiber_w(m),
         vmax_kmh: vmax,
         cruise_kmh: 0.12 * vmax,
-        stamina_s: 40.0 * (1.0 + 3.0 * (1.0 - sprint)) * m.powf(0.1),
+        stamina_s: 40.0 * (1.0 + 3.0 * (1.0 - sprint)) * mt.m_01,
         gestation_days: gestation,
         weaning_days: 0.8 * gestation * pace.powf(0.7),
-        maturity_days: 180.0 * adult.powf(0.25) * pace,
+        maturity_days: 180.0 * mt.adult_q * pace,
         neonate_kg: 0.07 * adult / litter.powf(0.5),
         gompertz_b: 0.02 * (1.6 - p.get(Trait::Maintenance)),
-        gompertz_g: 0.9 * adult.powf(-0.2) / pace,
+        gompertz_g: 0.9 * mt.adult_m02 / pace,
         fat_cap_kj: 0.18 * m * 1000.0 * 39.0 * 0.8,
         water_cap_g: 0.12 * m * 1000.0,
-        water_loss_g_day: 100.0 * m.powf(0.8) * (1.3 - 0.6 * p.get(Trait::Kidney)),
-        max_intake_kj_day: 4.5 * kleiber_w(m) * 86.4,
+        water_loss_g_day: 100.0 * mt.m_08 * (1.3 - 0.6 * p.get(Trait::Kidney)),
+        max_intake_kj_day: 4.5 * kw * 86.4,
         plant_eff: 0.62 * (1.0 - diet).powf(0.6),
         meat_eff: 0.85 * diet.powf(0.6),
-        perception_km: (0.5 + 4.0 * p.get(Trait::Senses)) * m.powf(0.15),
+        perception_km: (0.5 + 4.0 * p.get(Trait::Senses)) * mt.m_015,
+        ..thermal_fields(p, kw, mt.m_05)
+    }
+}
+
+/// Only the fields `thermal` reads (metabolism, conductance, evaporative capacity);
+/// the rest are zero. Cheaper than `derive` when only the heat balance is needed.
+pub fn derive_thermal(p: &Phenotype, mass_kg: f32) -> Derived {
+    let m = mass_kg.max(0.005);
+    thermal_fields(p, kleiber_w(m), m.powf(0.5))
+}
+
+fn thermal_fields(p: &Phenotype, kleiber: f32, m_05: f32) -> Derived {
+    let ins = p.get(Trait::Insulation);
+    let app = p.get(Trait::Appendage);
+    // Thermal conductance scales ~M^0.5; insulation lowers it, appendages raise it (Allen's rule).
+    let c_min = 0.27 * m_05 / (0.5 + 2.0 * ins) * app.powf(0.3);
+    Derived {
+        bmr_w: kleiber * maintenance_multiplier(p),
+        c_min,
+        c_max: c_min * (2.5 + 3.5 * p.get(Trait::HeatTolerance)) * app.powf(0.7),
+        evap_cap_w: (0.5 + 2.5 * p.get(Trait::HeatTolerance)) * kleiber,
+        ..Derived::default()
     }
 }
 

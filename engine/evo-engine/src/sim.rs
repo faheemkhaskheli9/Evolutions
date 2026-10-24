@@ -22,7 +22,10 @@ use std::collections::BTreeMap;
 pub const SAVE_MAGIC: &[u8; 4] = b"EVO1";
 /// Bumped whenever a model change alters outcomes (TRD TR-DA2).
 /// Version 2 added the replay log after the simulation state in save files.
-pub const MODEL_VERSION: u32 = 2;
+/// Version 3 (same save layout) draws binomial and Poisson counts faster (inversion
+/// for small counts, a polar normal approximation for large ones), which changes
+/// fixed-seed outcomes in both modes.
+pub const MODEL_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -1223,6 +1226,7 @@ impl Simulation {
                         self.world.roughage[i] = 0.0;
                     }
                 }
+                self.world.vegetation_changed();
                 self.world.shift_climate(-4.0);
                 self.climate_effects.push((self.year() + 8.0, 4.0));
                 self.event(

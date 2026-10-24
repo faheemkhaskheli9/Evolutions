@@ -123,7 +123,7 @@ This version implements the must-have scope of the PRD, plus several later items
 
 | Design document says | v0.1 does | Why / next step |
 |---|---|---|
-| Three fidelity modes (Individual, Population, Macro) | Individual and Population only | Macro mode (species-level, 1,000-year steps) is the next milestone. Population mode runs at about 30–70 simulated years per second natively (single-threaded, depending on world size; somewhat slower in the browser), so tens of thousands of years take minutes. |
+| Three fidelity modes (Individual, Population, Macro) | Individual and Population only | Macro mode (species-level, 1,000-year steps) is the next milestone. Population mode runs at about 40–90 simulated years per second natively (single-threaded, depending on world size; somewhat slower in the browser), so tens of thousands of years take minutes. |
 | 15-minute ticks; ≥ 100,000 animals on 8 cores | 1-hour ticks; single-threaded; about 0.2 µs per animal per tick; cap of 25,000 individuals (larger worlds use focus regions) | Parallel systems (rayon) are planned for native builds. |
 | ECS (`bevy_ecs`), FlatBuffers, SQLite saves, Tauri desktop shell | Plain Rust structs; JSON plus typed arrays between worker and UI; bincode `.evo` saves; browser app only | These keep the MVP small. The engine API is ready to be wrapped by a desktop shell. |
 | Hominin traits (bipedalism, culture, pigmentation) | Hominins and apes use the general trait set (brain size, sociality, sweating, diet …) | Cultural evolution and hominin-specific traits are planned (PRD §7.5, P1). |

@@ -133,6 +133,14 @@ pub struct World {
     /// from them (Population-mode patch contexts) know when they are stale.
     #[serde(skip)]
     pub revision: u64,
+    /// Tiles whose yearly vegetation cycle has reached a fixed point (a year of growth
+    /// leaves both stocks bit-for-bit unchanged), valid for climate `revision`
+    /// `veg_settled_rev`. `grow_vegetation_year` skips them, which gives the same
+    /// result as growing them. Cleared whenever stocks change any other way.
+    #[serde(skip)]
+    veg_settled: Vec<bool>,
+    #[serde(skip)]
+    veg_settled_rev: u64,
 }
 
 impl World {
@@ -178,6 +186,8 @@ impl World {
             global_offset: 0.0,
             has_ocean,
             revision: 0,
+            veg_settled: vec![],
+            veg_settled_rev: 0,
         };
         climate::compute_static(&mut world);
         hydrology::compute(&mut world);
@@ -337,6 +347,7 @@ impl World {
 
     /// Daily plant growth and carcass decay.
     pub fn grow_vegetation_day(&mut self, day_of_year: f64, carcass_decay: f32) {
+        self.vegetation_changed();
         let sc = Self::season_cos(day_of_year);
         for i in 0..self.w * self.h {
             self.grow(i, sc, 1.0);
@@ -347,15 +358,34 @@ impl World {
     /// One year of vegetation in monthly steps (Population mode, display only; demes
     /// draw on annual production, so coarse steps cost accuracy only on the map).
     pub fn grow_vegetation_year(&mut self) {
-        for month in 0..12 {
-            let sc = Self::season_cos(month as f64 * 30.44 + 15.0);
-            for i in 0..self.w * self.h {
-                self.grow(i, sc, 30.44);
+        let n = self.w * self.h;
+        if self.veg_settled.len() != n || self.veg_settled_rev != self.revision {
+            self.veg_settled.clear();
+            self.veg_settled.resize(n, false);
+            self.veg_settled_rev = self.revision;
+        }
+        let sc: [f32; 12] =
+            std::array::from_fn(|month| Self::season_cos(month as f64 * 30.44 + 15.0));
+        // Tiles are independent, so stepping each one through the year in turn is the
+        // same as stepping every tile month by month.
+        for i in 0..n {
+            if self.veg_settled[i] {
+                continue;
             }
+            let before = (self.forage[i].to_bits(), self.roughage[i].to_bits());
+            for &c in &sc {
+                self.grow(i, c, 30.44);
+            }
+            self.veg_settled[i] = before == (self.forage[i].to_bits(), self.roughage[i].to_bits());
         }
         for c in self.carcass.iter_mut() {
             *c = 0.0;
         }
+    }
+
+    /// Call after changing forage or roughage stocks outside the growth functions.
+    pub fn vegetation_changed(&mut self) {
+        self.veg_settled.clear();
     }
 
     /// Recompute the water-direction field (multi-source BFS from tiles with good access).
