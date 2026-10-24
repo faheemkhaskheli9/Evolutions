@@ -163,9 +163,18 @@ fn merge_sorted(a: &[(u32, f32)], b: &[(u32, f32)], wa: f32) -> Vec<(u32, f32)> 
     out
 }
 
-/// Climate and resources of one patch, recomputed each year.
+/// Patch contexts kept between years. They depend only on the world's climate
+/// fields, the patch size and the habitat area per tile, so they are rebuilt when
+/// any of these changes.
+#[derive(Default)]
+pub(crate) struct PatchCache {
+    key: Option<(u64, u32, usize, u64)>,
+    ctxs: std::sync::Arc<Vec<PatchCtx>>,
+}
+
+/// Climate and resources of one patch.
 #[derive(Clone, Default)]
-struct PatchCtx {
+pub(crate) struct PatchCtx {
     land: Vec<usize>,
     temp_month: [f32; 12],
     diurnal: f32,
@@ -334,7 +343,22 @@ fn fitness(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32, mean_fec: f32) -> f
 }
 
 impl Simulation {
-    fn patch_contexts(&self) -> Vec<PatchCtx> {
+    /// Patch contexts, reused until the climate or the patch settings change.
+    fn patch_contexts(&mut self) -> std::sync::Arc<Vec<PatchCtx>> {
+        let key = (
+            self.world.revision,
+            self.world.global_offset.to_bits(),
+            self.params.patch_size,
+            self.params.habitat_m2_per_tile.to_bits(),
+        );
+        if self.patch_cache.key != Some(key) {
+            self.patch_cache.ctxs = std::sync::Arc::new(self.build_patch_contexts());
+            self.patch_cache.key = Some(key);
+        }
+        self.patch_cache.ctxs.clone()
+    }
+
+    fn build_patch_contexts(&self) -> Vec<PatchCtx> {
         let (pw, ph) = (self.patches_w(), self.patches_h());
         let ps = self.params.patch_size;
         let w = &self.world;
@@ -563,10 +587,15 @@ impl Simulation {
             for &(_, j, kills, _) in &requests {
                 *asked.entry(j).or_default() += kills;
             }
+            // Each hunted deme's cap, worked out once rather than once per predator.
+            let scale_of: BTreeMap<usize, f32> = asked
+                .iter()
+                .map(|(&j, &a)| (j, (cap_of(j) / a.max(1e-6)).min(1.0)))
+                .collect();
             let mut kills_on: BTreeMap<usize, f32> = BTreeMap::new();
             let mut got: BTreeMap<usize, (f32, f32)> = BTreeMap::new();
             for &(k, j, kills, need_eq) in &requests {
-                let scale = (cap_of(j) / asked[&j].max(1e-6)).min(1.0);
+                let scale = scale_of[&j];
                 *kills_on.entry(j).or_default() += kills * scale;
                 let kj = kill_kj(&derived[j], means[j].get(Trait::BodyMass));
                 let e = got.entry(k).or_insert((0.0, need_eq * kj));

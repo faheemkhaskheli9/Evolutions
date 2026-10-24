@@ -111,6 +111,8 @@ pub struct Simulation {
     /// Last Population-mode step's vital rates per deme: (species, patch, n, rates).
     #[serde(skip)]
     pub diagnostics: Vec<(u32, u32, u32, crate::population::Annual)>,
+    #[serde(skip)]
+    pub(crate) patch_cache: crate::population::PatchCache,
     /// Creation settings and user actions (PRD FR-P2). Saved after the state, as JSON,
     /// so it is not part of `state_hash()`.
     #[serde(skip)]
@@ -190,6 +192,7 @@ impl Simulation {
             index: Default::default(),
             pending: vec![],
             diagnostics: vec![],
+            patch_cache: Default::default(),
             replay: ReplayLog {
                 origin: Some(origin),
                 entries: vec![],
