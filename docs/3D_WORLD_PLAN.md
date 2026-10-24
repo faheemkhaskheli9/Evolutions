@@ -5,7 +5,7 @@
 | Document | Implementation plan |
 | Feature | A single 3D world that contains the whole simulation |
 | Date | 2026-10-19 |
-| Status | Phases 1–7 done |
+| Status | Phases 1–8 done |
 | Related | [3D World PRD](./3D_WORLD_PRD.md) · [3D World TRD](./3D_WORLD_TRD.md) · [3D World System Design](./3D_WORLD_SYSTEM_DESIGN.md) |
 
 ---
@@ -85,12 +85,12 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | 7.1 | The snow cover (already sent once a day) is passed to the plants. Snow whitens tree crowns and buries grass (thinned from 30% cover, gone at 70%). Broadleaf trees in temperate grassland, forest and rainforest beyond the tropics follow the season of their hemisphere: green in summer, gold or red (per tree, a few days apart) from mid-September, bare from mid-November, light green as the leaves come out in April–May. The plants are laid out again when the day changes, at most four times a second. | The seasons show on the plants as well as on the ground. |
 | 7.2 | The sun casts PCF soft shadows (2,048² map). The shadow camera covers a square about as wide as the view around the camera target, so shadows are sharp close up and still cover the screen when zoomed out; the normal bias grows with the texel size. Terrain, trees and grass cast and receive shadows; animals cast them only when drawn at true size (bodies enlarged to stay visible do not). Shadows fade out with the light at dusk. | Low winter sun reads as such: long shadows behind trees and mountains. |
 
-### Next (proposed)
+### Phase 8: Shadows that match, and wind (done)
 
-| # | Task | Why |
+| # | Task | Result |
 |---|---|---|
-| 8.1 | Bend the shadows of animals with the same shader as their bodies (legs, ornament). | Shadows match the drawn shape exactly. |
-| 8.2 | Wind in the grass and tree crowns. | The scene feels alive when time is paused. |
+| 8.1 | Animals cast their shadows through a depth material bent by the same shader as their bodies (leg length, swinging legs, ornament plume). | Shadows match the drawn shape exactly. |
+| 8.2 | Each plant vertex carries how far it bends (0 at the base, growing with height²; grass bends most, conifers least). The vertex shader pushes plants downwind (from the west) with a sway that rolls across the land and slow gusts, on the wall clock; the shadow depth material sways the same way. The scene keeps drawing while plants are shown. | The scene feels alive when time is paused. |
 
 ## Testing
 
@@ -106,4 +106,5 @@ The engine does not change. The 3D world is a new view over the same frame data 
 | Large worlds with many herds drop frames | Instancing, mesh reuse, layout only when data or zoom changes (or while animals move); sprites above 20,000 figures (5.5). |
 | Plants add many triangles | Low-poly plants (12–28 triangles), only near the camera target and only when zoomed in, half as many until tiles are large, at most 80,000 of each kind. |
 | Shadows draw the scene twice | One 2,048² map fitted to the view; sprites and herds cast none. |
+| Wind redraws every frame | Only while plants are shown (zoomed in near the camera target); plants are low-poly and capped. |
 | 3D picking is less precise than the flat map | Pick radius scales with zoom; zooming in makes selection exact. |

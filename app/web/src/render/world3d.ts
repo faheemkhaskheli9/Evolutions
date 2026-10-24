@@ -134,6 +134,50 @@ varying float vOrnament;`,
   };
 }
 
+/**
+ * Wind in the plants (`aBend`: how far a vertex moves, growing with its height above the
+ * base). Every plant leans and sways the same way, with gusts that roll across the land
+ * from the west; neighbours sway nearly together. Runs on the wall clock, so the plants
+ * move when the simulation is paused.
+ */
+function windPlants(mat: THREE.Material, time: { value: number }) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = time;
+    sh.vertexShader = sh.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+attribute float aBend;
+uniform float uTime;`,
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+#ifdef USE_INSTANCING
+{
+  vec2 at = instanceMatrix[3].xz;
+  float gust = 0.55 + 0.45 * sin(uTime * 0.4 - at.x * 0.08 + sin(at.y * 0.05));
+  float sway = 0.35 + sin(uTime * 1.6 - at.x * 0.5 + at.y * 0.3) * 0.7 + sin(uTime * 3.7 + at.x * 1.3 - at.y * 1.1) * 0.25;
+  // Push in the scene's axes, carried back into the plant's own (it is turned and scaled).
+  vec3 push = vec3(0.94, 0.0, 0.34) * (sway * gust * aBend * length(instanceMatrix[1].xyz));
+  transformed += inverse(mat3(instanceMatrix)) * push;
+}
+#endif`,
+      );
+  };
+}
+
+/** Marks how far each vertex bends in the wind: `amount` at the top, 0 at the base, rising with height². */
+function withBend(g: THREE.BufferGeometry, amount: number) {
+  const pos = g.attributes.position;
+  let top = 0;
+  for (let i = 0; i < pos.count; i++) top = Math.max(top, pos.getY(i));
+  const bend = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) bend[i] = amount * Math.max(0, pos.getY(i) / top) ** 2;
+  g.setAttribute("aBend", new THREE.BufferAttribute(bend, 1));
+  return g;
+}
+
 /** A white side-on animal silhouette, tinted per point for distant figures drawn as sprites. */
 function spriteTexture() {
   const c = document.createElement("canvas");
@@ -244,7 +288,7 @@ function coniferGeometry() {
   const crown = tinted(new THREE.ConeGeometry(0.07, 0.26, 6).translate(0, 0.18, 0), [1, 1, 1]);
   const g = mergeGeometries([trunk, crown])!;
   g.computeVertexNormals();
-  return g;
+  return withBend(g, 0.012);
 }
 
 /** A broadleaf tree about 0.25 tiles tall: a round crown on a trunk (28 triangles). */
@@ -253,7 +297,7 @@ function broadleafGeometry() {
   const crown = tinted(new THREE.IcosahedronGeometry(0.08, 0).scale(1, 0.8, 1).translate(0, 0.17, 0), [1, 1, 1]);
   const g = mergeGeometries([trunk, crown])!;
   g.computeVertexNormals();
-  return g;
+  return withBend(g, 0.014);
 }
 
 /** A tuft of grass: three thin blades (12 triangles). */
@@ -263,7 +307,7 @@ function grassGeometry() {
   );
   const g = mergeGeometries(blades)!;
   g.computeVertexNormals();
-  return g;
+  return withBend(g, 0.016);
 }
 
 /**
@@ -411,6 +455,8 @@ export class World3D {
   private herdGeo = simpleAnimalGeometry();
   private time = { value: 0 };
   private animalMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  /** Casts the animals' shadows with the same bent legs and plume as their bodies. */
+  private animalDepthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   private animals: THREE.InstancedMesh | null = null;
   private shapeAttr: THREE.InstancedBufferAttribute | null = null;
   private animalData: AnimalFrame | null = null;
@@ -437,6 +483,8 @@ export class World3D {
   private snow: Float32Array | null = null;
   private plantsOn = true;
   private plantMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  /** Casts the plants' shadows swaying with them. */
+  private plantDepthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   private plantGeos = [coniferGeometry(), broadleafGeometry(), grassGeometry()];
   private plants: THREE.InstancedMesh[] = [];
   /** Camera target, detail and day when plants were last laid out (NaN: lay out again). */
@@ -503,6 +551,9 @@ export class World3D {
     this.scene.fog = new THREE.Fog(DAY_SKY.clone(), 100, 400);
     this.scene.add(this.hemi, this.sun, this.sun.target, this.animalSprites.points, this.herdSprites.points);
     shapeAnimals(this.animalMat, this.time);
+    shapeAnimals(this.animalDepthMat, this.time);
+    windPlants(this.plantMat, this.time);
+    windPlants(this.plantDepthMat, this.time);
 
     const boxGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1).translate(0.5, 0.5, 0.5));
     this.focusBox = new THREE.LineSegments(boxGeo, new THREE.LineBasicMaterial({ color: 0xffffff, fog: false }));
@@ -528,6 +579,7 @@ export class World3D {
       m.frustumCulled = false;
       m.castShadow = true;
       m.receiveShadow = true;
+      m.customDepthMaterial = this.plantDepthMat;
       // Allocate instance colours up front so the material compiles with them.
       m.setColorAt(0, new THREE.Color(1, 1, 1));
       return m;
@@ -1453,6 +1505,7 @@ export class World3D {
       this.animals = new THREE.InstancedMesh(this.animalGeo, this.animalMat, cap);
       this.animals.frustumCulled = false;
       this.animals.receiveShadow = true;
+      this.animals.customDepthMaterial = this.animalDepthMat;
       this.scene.add(this.animals);
     }
     const mesh = this.animals;
@@ -1541,7 +1594,9 @@ export class World3D {
     if (d && detailed && this.animals?.count) {
       for (let i = 0; i < d.walkUntil.length && !walking; i++) walking = d.walkUntil[i] > now;
     }
-    if (moving || walking) this.requestRender();
+    // And while plants are shown: they sway in the wind.
+    const plants = this.plants.some((m) => m.count > 0);
+    if (moving || walking || plants) this.requestRender();
   }
 
   dispose() {
@@ -1560,6 +1615,10 @@ export class World3D {
     this.bars?.dispose();
     for (const m of this.plants) m.dispose();
     for (const g of this.plantGeos) g.dispose();
+    this.plantMat.dispose();
+    this.plantDepthMat.dispose();
+    this.animalMat.dispose();
+    this.animalDepthMat.dispose();
     this.pathLine.geometry.dispose();
     this.renderer.dispose();
   }
