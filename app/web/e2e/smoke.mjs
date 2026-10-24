@@ -1,7 +1,7 @@
 // End-to-end smoke test: build output served by `vite preview`, driven in Chromium.
 // Usage: npm run build && npm run test:e2e   (set SHOTS=dir to save screenshots)
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -155,6 +155,25 @@ try {
     await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });
     await page.getByRole("button", { name: "Resume" }).click();
     await page.locator(".badge").waitFor({ timeout: 30000 });
+  });
+  await step("export data files", async () => {
+    await page.getByRole("tab", { name: "World" }).click();
+    const download = async (name) => {
+      const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name }).click()]);
+      const file = join(tmpdir(), `evo-export-${process.pid}-${d.suggestedFilename()}`);
+      await d.saveAs(file);
+      return { name: d.suggestedFilename(), text: readFileSync(file, "utf8") };
+    };
+    const first = page.getByLabel("Species to export").locator("option").nth(1);
+    await page.getByLabel("Species to export").selectOption({ value: await first.getAttribute("value") });
+    const series = await download("Time series (CSV)");
+    if (!/^species_\d+_.+\.csv$/.test(series.name) || !series.text.startsWith("year,n,het,body_mass,")) throw new Error(`bad time series ${series.name}`);
+    const chronicle = await download("Chronicle (CSV)");
+    if (!chronicle.text.startsWith("year,kind,species,species_name,text\n")) throw new Error("bad chronicle header");
+    const tree = await download("Phylogeny (Newick)");
+    if (!/^\(.*\);$/.test(tree.text)) throw new Error("bad Newick");
+    const settings = JSON.parse((await download("Settings (JSON)")).text);
+    if (settings.format !== "evolutions-settings" || settings.template !== "earth") throw new Error("bad settings");
   });
   await step("export a replay log and replay it", async () => {
     // The log survived the autosave, so the resumed world can be replayed from its seed.

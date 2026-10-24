@@ -1,6 +1,6 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import type { AlleleInfo, Catalog, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
+import type { AlleleInfo, Catalog, ExportKind, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
 import { ALLELE_RAMP } from "../util";
 import type { Layer, Tool } from "./MapView";
 
@@ -29,6 +29,8 @@ interface Props {
   setFounderCount: (n: number) => void;
   onExportReplay: () => void;
   onReplay: () => void;
+  /** Downloads data files; `species` limits the time series to one species. */
+  onExportData: (what: ExportKind, species?: number) => void;
   /** A jump or replay is running. */
   busy: boolean;
 }
@@ -58,6 +60,7 @@ export function describeAllele(a: AlleleInfo) {
 export function WorldPanel(p: Props) {
   const [plagueSpecies, setPlagueSpecies] = useState<number | "">("");
   const [plagueRate, setPlagueRate] = useState(50);
+  const [exportSpecies, setExportSpecies] = useState<number | "">("");
   const alive = p.species.filter((s) => s.extinct_year === null);
   return (
     <div className="panel-body">
@@ -216,6 +219,42 @@ export function WorldPanel(p: Props) {
         </button>
         <button disabled={!p.status || p.busy} onClick={p.onReplay} title="Rebuild this world from its seed and check it ends up identical">
           Replay from the start
+        </button>
+      </div>
+      <h3>Export data</h3>
+      <p className="muted small">
+        Download the data for a spreadsheet, R or Python. The files are the same as the command-line runner writes (<code>evo run --csv --chronicle --newick --settings</code>).
+      </p>
+      <div className="row wrap">
+        <select
+          value={exportSpecies}
+          onChange={(e) => setExportSpecies(e.target.value === "" ? "" : Number(e.target.value))}
+          aria-label="Species to export"
+        >
+          <option value="">All species</option>
+          {p.species.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.common_name} ({s.name})
+            </option>
+          ))}
+        </select>
+        <button
+          disabled={!p.status || p.busy}
+          onClick={() => p.onExportData("species", exportSpecies === "" ? undefined : exportSpecies)}
+          title="Population, heterozygosity and each trait's mean and SD over time, one CSV file per species"
+        >
+          Time series (CSV)
+        </button>
+      </div>
+      <div className="row wrap">
+        <button disabled={!p.status || p.busy} onClick={() => p.onExportData("chronicle")}>
+          Chronicle (CSV)
+        </button>
+        <button disabled={!p.status || p.busy} onClick={() => p.onExportData("newick")}>
+          Phylogeny (Newick)
+        </button>
+        <button disabled={!p.status || p.busy} onClick={() => p.onExportData("settings")} title="Template, seed, realism, world-generator settings and founders">
+          Settings (JSON)
         </button>
       </div>
       {p.status && (

@@ -92,3 +92,10 @@ The user guide is updated to match (speed presets, mode overrides, regions acros
 - **Lint:** ESLint 9 (`npm run lint`) with the recommended JavaScript and TypeScript rules and the React Hooks rules, failing on any warning.
 - **CI:** the web job runs `npm run lint` and `npm test` before the WASM build.
 
+
+## Phase 7: Data export from the app (done, #21)
+
+- **Engine:** `evo_engine::export` holds the writers: `species_csv` / `species_csv_files` (per-species `year,n,het`, the trait means, then each trait's SD as `<trait>_sd`), `chronicle_csv` (`year,kind,species,species_name,text`, quoted per RFC 4180) and `settings_json` (template, seed, realism, generator settings, founders). `newick` was already there.
+- **CLI:** `--csv` now uses the shared writer, so its files gain the SD columns after the existing mean columns. New `--chronicle <file>` and `--settings <file>`.
+- **App:** **Export data** in the World tab downloads the time series (all species or one), the Chronicle, the Newick tree and the settings, through new `evo-wasm` methods (`species_csv_files`, `chronicle_csv`, `settings_json`).
+- **Tests:** `evo-cli/tests/export.rs` runs `evo run --load … --years 0` with every export option and checks each file is byte-identical to what the engine returns for the same save (what the app downloads), and checks the headers. Vitest covers `exportFiles` in `protocol.ts`; the e2e smoke test downloads each file and checks its header.

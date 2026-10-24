@@ -4,7 +4,7 @@
 
 import init, { Engine, ReplayRun } from "../wasm/evo_wasm.js";
 import { Autosaver, readAutosave, writeAutosave } from "./autosave";
-import type { FrameMsg, FromWorker, ModeChoice, SimEvent, SpeciesInfo, StopCondition, ToWorker } from "./protocol";
+import { exportFiles, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
 import { smoothSpeed } from "../util";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -470,6 +470,9 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         break;
       case "newick":
         if (engine) post({ type: "newick", text: engine.newick() });
+        break;
+      case "exportData":
+        if (engine) post({ type: "exportedData", files: exportFiles(engine, m.what, m.species) });
         break;
       case "exportReplay":
         if (engine) post({ type: "replayScript", text: engine.replay_script() });
