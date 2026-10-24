@@ -12,8 +12,8 @@
 use crate::animal::{Animal, Sex};
 use crate::genetics::{incompatible, AlleleTable, Genome, GenomeArch, LocusKind, NO_TRAIT};
 use crate::physiology::{
-    camouflage, derive, gompertz_hazard, mate_acceptance, roughage_quality, thermal, Derived,
-    EVAP_J_PER_G, TISSUE_KJ_PER_KG,
+    camouflage, derive, derive_thermal, derive_with, gompertz_hazard, mate_acceptance,
+    roughage_quality, thermal, Derived, MassTerms, EVAP_J_PER_G, TISSUE_KJ_PER_KG,
 };
 use crate::rng::{stream, Rng};
 use crate::sim::Simulation;
@@ -131,8 +131,9 @@ impl Deme {
             return;
         }
         let w1 = n1 / (n1 + n2);
+        let mut scratch = Vec::new();
         for (l, pool) in self.freqs.iter_mut().enumerate() {
-            *pool = merge_sorted(pool, &other.freqs[l], w1);
+            merge_sorted(pool, &other.freqs[l], w1, &mut scratch);
         }
         for k in 0..AGE_CLASSES {
             self.females[k] += other.females[k];
@@ -142,25 +143,37 @@ impl Deme {
     }
 }
 
-/// Weighted merge of two allele-frequency pools sorted by allele id.
-fn merge_sorted(a: &[(u32, f32)], b: &[(u32, f32)], wa: f32) -> Vec<(u32, f32)> {
+/// Weighted merge of two allele-frequency pools sorted by allele id: `a` becomes
+/// `wa·a + (1 − wa)·b`. `scratch` is reused between calls so merging rarely allocates.
+fn merge_sorted(a: &mut Vec<(u32, f32)>, b: &[(u32, f32)], wa: f32, scratch: &mut Vec<(u32, f32)>) {
     let wb = 1.0 - wa;
-    let mut out = Vec::with_capacity(a.len().max(b.len()) + 2);
+    // Common case: both pools carry the same alleles.
+    if a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0) {
+        for (x, y) in a.iter_mut().zip(b) {
+            x.1 = x.1 * wa + y.1 * wb;
+        }
+        return;
+    }
+    scratch.clear();
     let (mut i, mut j) = (0, 0);
-    while i < a.len() || j < b.len() {
-        if j >= b.len() || (i < a.len() && a[i].0 < b[j].0) {
-            out.push((a[i].0, a[i].1 * wa));
+    while i < a.len() && j < b.len() {
+        let (x, y) = (a[i], b[j]);
+        if x.0 < y.0 {
+            scratch.push((x.0, x.1 * wa));
             i += 1;
-        } else if i >= a.len() || b[j].0 < a[i].0 {
-            out.push((b[j].0, b[j].1 * wb));
+        } else if y.0 < x.0 {
+            scratch.push((y.0, y.1 * wb));
             j += 1;
         } else {
-            out.push((a[i].0, a[i].1 * wa + b[j].1 * wb));
+            scratch.push((x.0, x.1 * wa + y.1 * wb));
             i += 1;
             j += 1;
         }
     }
-    out
+    scratch.extend(a[i..].iter().map(|&(id, p)| (id, p * wa)));
+    scratch.extend(b[j..].iter().map(|&(id, p)| (id, p * wb)));
+    a.clear();
+    a.extend_from_slice(scratch);
 }
 
 /// Patch contexts kept between years. They depend only on the world's climate
@@ -251,21 +264,56 @@ fn catchability(p: &Phenotype, d: &Derived, lum: f32) -> f32 {
 }
 
 /// Annual vital rates of a phenotype in a patch (shared physiology, TRD TR-MP2).
-fn annual(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
-    let adult = p.get(Trait::BodyMass);
-    let d = derive(p, adult);
-    let mut need = 0.0;
-    let mut evap_g = 0.0;
-    let (mut heat_s, mut cold_s) = (0.0, 0.0);
+/// `d` is `derive(p, adult mass)`.
+fn annual(p: &Phenotype, d: &Derived, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
+    annual_heat(p, d, &year_heat(d, pc), pc, eco, bg)
+}
+
+/// A year's heat balance of an adult: energy for thermoregulation, evaporative water
+/// loss and heat/cold stress. Reads only the fields set by `derive_thermal`.
+#[derive(Clone, Copy)]
+struct YearHeat {
+    need: f32,
+    evap_g: f32,
+    heat_s: f32,
+    cold_s: f32,
+}
+
+fn year_heat(d: &Derived, pc: &PatchCtx) -> YearHeat {
+    let mut y = YearHeat {
+        need: 0.0,
+        evap_g: 0.0,
+        heat_s: 0.0,
+        cold_s: 0.0,
+    };
     for &t in &pc.temp_month {
         for ta in [t - pc.diurnal, t + pc.diurnal] {
-            let (heat, th) = behavioural_thermal(&d, ta);
-            need += (heat + th.extra_w) * 86.4 * 15.22;
-            evap_g += th.evap_w * 86400.0 / EVAP_J_PER_G * 15.22;
-            heat_s += th.heat_stress / 24.0;
-            cold_s += th.cold_stress / 24.0;
+            let (heat, th) = behavioural_thermal(d, ta);
+            y.need += (heat + th.extra_w) * 86.4 * 15.22;
+            y.evap_g += th.evap_w * 86400.0 / EVAP_J_PER_G * 15.22;
+            y.heat_s += th.heat_stress / 24.0;
+            y.cold_s += th.cold_stress / 24.0;
         }
     }
+    y
+}
+
+/// `annual` with the adult's heat balance `yh = year_heat(d, pc)` already worked out.
+fn annual_heat(
+    p: &Phenotype,
+    d: &Derived,
+    yh: &YearHeat,
+    pc: &PatchCtx,
+    eco: &Eco,
+    bg: f32,
+) -> Annual {
+    let adult = p.get(Trait::BodyMass);
+    let YearHeat {
+        need,
+        evap_g,
+        heat_s,
+        cold_s,
+    } = *yh;
     let cycle = d.gestation_days + d.weaning_days;
     let litters = if cycle < 300.0 {
         (90.0 / cycle).clamp(1.0, 2.5)
@@ -301,7 +349,7 @@ fn annual(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
         * (1.3 - p.get(Trait::Kidney))
         * 0.8;
     let pred = if eco.mean_catch > 0.0 {
-        eco.pred_hazard * catchability(p, &d, pc.luminance) / eco.mean_catch
+        eco.pred_hazard * catchability(p, d, pc.luminance) / eco.mean_catch
     } else {
         0.0
     };
@@ -309,7 +357,7 @@ fn annual(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
     // Newborns face the season they are born into.
     let birth_month =
         ((p.get(Trait::BreedingDay) + d.gestation_days / 365.25) * 12.0) as usize % 12;
-    let dn = derive(p, d.neonate_kg);
+    let dn = derive_thermal(p, d.neonate_kg);
     let tb = thermal(&dn, dn.bmr_w * 1.2, pc.temp_month[birth_month]);
     let birth_stress = 0.3 * tb.cold_stress
         + 0.3 * tb.heat_stress
@@ -334,10 +382,48 @@ fn annual(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
     }
 }
 
+/// Traits that `fitness` does not read (their own value; deme means enter through
+/// `Eco`). Their selection gradient is exactly zero, so it is not computed.
+const FITNESS_NEUTRAL: [Trait; 5] = [
+    Trait::Boldness,
+    Trait::Sociality,
+    Trait::Preference,
+    Trait::Choosiness,
+    Trait::Dispersal,
+];
+
+/// Traits that `derive_thermal` (and so `year_heat`) does not read. Changing one of
+/// them leaves the adult's heat balance bit-for-bit unchanged.
+const HEAT_NEUTRAL: [Trait; 6] = [
+    Trait::LegLength,
+    Trait::Diet,
+    Trait::CoatLuminance,
+    Trait::LitterSize,
+    Trait::Pace,
+    Trait::BreedingDay,
+];
+
 /// Fitness used for the selection gradient: survival plus credited reproduction.
-fn fitness(p: &Phenotype, pc: &PatchCtx, eco: &Eco, bg: f32, mean_fec: f32) -> f32 {
-    let a = annual(p, pc, eco, bg);
-    let d = derive(p, p.get(Trait::BodyMass));
+/// `mass`, if given, is `MassTerms` for the phenotype's adult mass, and `heat` its
+/// `year_heat`; both are known when the phenotype differs from one already evaluated
+/// only in traits they do not depend on.
+fn fitness(
+    p: &Phenotype,
+    pc: &PatchCtx,
+    eco: &Eco,
+    bg: f32,
+    mean_fec: f32,
+    mass: Option<&MassTerms>,
+    heat: Option<&YearHeat>,
+) -> f32 {
+    let d = match mass {
+        Some(mt) => derive_with(p, mt),
+        None => derive(p, p.get(Trait::BodyMass)),
+    };
+    let a = match heat {
+        Some(yh) => annual_heat(p, &d, yh, pc, eco, bg),
+        None => annual(p, &d, pc, eco, bg),
+    };
     let s = (-(a.hazard + gompertz_hazard(&d, a.maturity_years + 1.0, 0.0))).exp();
     (s + 0.25 * (a.fecundity + mean_fec * a.mating.min(3.0))).max(1e-6)
 }
@@ -420,13 +506,12 @@ impl Simulation {
         let nd = self.demes.len();
 
         // Mean phenotypes.
-        let means: Vec<Phenotype> = self
+        let latents: Vec<[f32; N_TRAITS]> = self
             .demes
             .iter()
-            .map(|d| {
-                Phenotype::from_latent(&d.mean_latent(&self.archs[d.arch as usize], &self.alleles))
-            })
+            .map(|d| d.mean_latent(&self.archs[d.arch as usize], &self.alleles))
             .collect();
+        let means: Vec<Phenotype> = latents.iter().map(Phenotype::from_latent).collect();
         let derived: Vec<Derived> = means
             .iter()
             .map(|p| derive(p, p.get(Trait::BodyMass)))
@@ -439,6 +524,7 @@ impl Simulation {
         }
         let mut eco = vec![Eco::default(); nd];
         let mut base_need = vec![0f32; nd];
+        let mut base_fec = vec![0f32; nd];
         for (k, d) in self.demes.iter().enumerate() {
             let pc = &ctxs[d.patch as usize];
             let probe = Eco {
@@ -447,7 +533,9 @@ impl Simulation {
                 mean_acc: 1.0,
                 ..Default::default()
             };
-            base_need[k] = annual(&means[k], pc, &probe, bg).need_kj;
+            let a = annual(&means[k], &derived[k], pc, &probe, bg);
+            base_need[k] = a.need_kj;
+            base_fec[k] = a.fecundity;
         }
         let kj_g = self.params.forage_kj_per_g as f32;
         let kill_kj = |prey: &Derived, m: f32| -> f32 {
@@ -514,18 +602,8 @@ impl Simulation {
             // taken, so the yearly loss a prey deme can suffer scales with its
             // reproductive output; cover shelters part of it.
             let cap_of = |j: usize| -> f32 {
-                let fec = annual(
-                    &means[j],
-                    pc,
-                    &Eco {
-                        food_ratio: 1.0,
-                        mean_plant_eff: derived[j].plant_eff,
-                        mean_acc: 1.0,
-                        ..Default::default()
-                    },
-                    bg,
-                )
-                .fecundity;
+                // Prey share the patch, so their fed-to-capacity fecundity is `base_fec`.
+                let fec = base_fec[j];
                 let vulnerable = (0.08 + 0.3 * fec).clamp(0.08, 0.7) * (1.0 - 0.4 * pc.cover);
                 vulnerable * self.demes[j].total() as f32
             };
@@ -687,21 +765,34 @@ impl Simulation {
             let arch = &self.archs[deme.arch as usize];
             let pc = &ctxs[deme.patch as usize];
             let e = eco[k];
-            let base = annual(&means[k], pc, &e, bg);
+            let base_heat = year_heat(&derived[k], pc);
+            let adult = means[k].get(Trait::BodyMass);
+            let base_mass = MassTerms::new(adult, adult);
+            let base = annual_heat(&means[k], &derived[k], &base_heat, pc, &e, bg);
             diag.push((deme.species, deme.patch, deme.total(), base));
             let d = &derived[k];
 
-            // Selection gradient on the latent scale.
-            let latent = deme.mean_latent(arch, &self.alleles);
+            // Selection gradient on the latent scale. Allele frequencies have not changed
+            // since `latents` was computed.
+            let latent = latents[k];
             let delta = 0.05f32;
             let mut beta = [0f32; N_TRAITS];
             for (t, b) in beta.iter_mut().enumerate() {
-                let mut hi = latent;
-                let mut lo = latent;
-                hi[t] += delta;
-                lo[t] -= delta;
-                let wh = fitness(&Phenotype::from_latent(&hi), pc, &e, bg, base.fecundity);
-                let wl = fitness(&Phenotype::from_latent(&lo), pc, &e, bg, base.fecundity);
+                let trait_t = Trait::from_index(t);
+                if FITNESS_NEUTRAL.contains(&trait_t) {
+                    continue;
+                }
+                // The mean phenotype with trait t moved up or down (the other traits'
+                // transforms are unchanged, so they are not recomputed).
+                let mut hi = means[k];
+                let mut lo = means[k];
+                hi.0[t] = trait_t.to_phenotype(latent[t] + delta);
+                lo.0[t] = trait_t.to_phenotype(latent[t] - delta);
+                let heat = HEAT_NEUTRAL.contains(&trait_t).then_some(&base_heat);
+                let mass = (trait_t != Trait::BodyMass).then_some(&base_mass);
+                let fec = base.fecundity;
+                let wh = fitness(&hi, pc, &e, bg, fec, mass, heat);
+                let wl = fitness(&lo, pc, &e, bg, fec, mass, heat);
                 // Gradients per latent unit, capped at strengths seen in nature
                 // (|β| ≲ 0.5 per phenotypic SD; Kingsolver et al. 2001).
                 *b = ((wh.ln() - wl.ln()) / (2.0 * delta)).clamp(-1.0, 1.0);
@@ -922,6 +1013,7 @@ impl Simulation {
             .enumerate()
             .map(|(i, d)| ((d.species, d.patch), i))
             .collect();
+        let mut scratch = Vec::new();
         for (k, to, count) in moves {
             let mut rng = Rng::keyed(
                 seed,
@@ -979,7 +1071,7 @@ impl Simulation {
                     let (n1, n2) = (dst.total() as f32, taken as f32);
                     let w1 = n1 / (n1 + n2);
                     for (l, pool) in dst.freqs.iter_mut().enumerate() {
-                        *pool = merge_sorted(pool, &src.freqs[l], w1);
+                        merge_sorted(pool, &src.freqs[l], w1, &mut scratch);
                     }
                     for a in 0..AGE_CLASSES {
                         dst.females[a] += females[a];
@@ -1226,13 +1318,18 @@ fn prune_rare(pool: &mut Vec<(u32, f32)>, max: usize) {
 pub fn multinomial_resample(pool: &mut Vec<(u32, f32)>, copies: u64, rng: &mut Rng) {
     let mut left = copies;
     let mut rest = 1.0f64;
-    for x in pool.iter_mut() {
+    let last = pool.len().saturating_sub(1);
+    for (i, x) in pool.iter_mut().enumerate() {
         if left == 0 || rest <= 0.0 {
             x.1 = 0.0;
             continue;
         }
-        let p = (x.1 as f64 / rest).clamp(0.0, 1.0);
-        let k = rng.binomial(left, p);
+        // The last allele takes the remaining copies (its conditional share is 1).
+        let k = if i == last {
+            left
+        } else {
+            rng.binomial(left, (x.1 as f64 / rest).clamp(0.0, 1.0))
+        };
         rest -= x.1 as f64;
         left -= k;
         x.1 = k as f32 / copies as f32;
@@ -1242,4 +1339,129 @@ pub fn multinomial_resample(pool: &mut Vec<(u32, f32)>, copies: u64, rng: &mut R
         return;
     }
     normalise(pool);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_sorted_weights_and_keeps_order() {
+        let mut scratch = Vec::new();
+        let mut a = vec![(1, 0.5), (3, 0.5)];
+        let b = [(2, 0.25), (3, 0.75)];
+        merge_sorted(&mut a, &b, 0.5, &mut scratch);
+        assert_eq!(a, vec![(1, 0.25), (2, 0.125), (3, 0.625)]);
+        merge_sorted(&mut a, &[], 1.0, &mut scratch);
+        assert_eq!(a, vec![(1, 0.25), (2, 0.125), (3, 0.625)]);
+        merge_sorted(
+            &mut a,
+            &[(1, 0.75), (2, 0.125), (3, 0.125)],
+            0.5,
+            &mut scratch,
+        );
+        assert_eq!(a, vec![(1, 0.5), (2, 0.125), (3, 0.375)]);
+        // Against a plain merge on random pools.
+        let mut rng = Rng::new(3);
+        for _ in 0..500 {
+            let pool = |rng: &mut Rng| -> Vec<(u32, f32)> {
+                let mut ids: Vec<u32> = (0..rng.below(8)).map(|_| rng.below(12) as u32).collect();
+                ids.sort();
+                ids.dedup();
+                ids.into_iter().map(|id| (id, rng.f32())).collect()
+            };
+            let (mut a, b) = (pool(&mut rng), pool(&mut rng));
+            let wa = rng.f32();
+            let mut want: Vec<(u32, f32)> = vec![];
+            for id in 0..12u32 {
+                let x = a.iter().find(|x| x.0 == id).map(|x| x.1);
+                let y = b.iter().find(|y| y.0 == id).map(|y| y.1);
+                match (x, y) {
+                    (Some(x), Some(y)) => want.push((id, x * wa + y * (1.0 - wa))),
+                    (Some(x), None) => want.push((id, x * wa)),
+                    (None, Some(y)) => want.push((id, y * (1.0 - wa))),
+                    (None, None) => {}
+                }
+            }
+            merge_sorted(&mut a, &b, wa, &mut scratch);
+            assert_eq!(a, want);
+        }
+    }
+
+    #[test]
+    fn fitness_ignores_neutral_traits_and_reuses_heat() {
+        let pc = PatchCtx {
+            temp_month: [
+                -5.0, 0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0,
+            ],
+            diurnal: 6.0,
+            water_access: 0.4,
+            luminance: 0.5,
+            cover: 0.3,
+            ..Default::default()
+        };
+        let eco = Eco {
+            food_ratio: 0.8,
+            pred_hazard: 0.3,
+            mean_catch: 0.7,
+            mean_plant_eff: 0.4,
+            mean_pref: 0.4,
+            mean_choosy: 0.5,
+            mean_acc: 0.6,
+            mean_supply: 1.2,
+        };
+        let mut rng = Rng::new(5);
+        for _ in 0..50 {
+            let latent: [f32; N_TRAITS] = std::array::from_fn(|_| rng.normal() as f32 * 0.8);
+            let w = fitness(
+                &Phenotype::from_latent(&latent),
+                &pc,
+                &eco,
+                0.05,
+                1.3,
+                None,
+                None,
+            );
+            let p = Phenotype::from_latent(&latent);
+            let yh = year_heat(&derive(&p, p.get(Trait::BodyMass)), &pc);
+            for t in HEAT_NEUTRAL {
+                let mut l = latent;
+                l[t as usize] += 0.5;
+                let q = Phenotype::from_latent(&l);
+                let qh = year_heat(&derive(&q, q.get(Trait::BodyMass)), &pc);
+                let bits = |h: &YearHeat| [h.need, h.evap_g, h.heat_s, h.cold_s].map(f32::to_bits);
+                assert_eq!(bits(&yh), bits(&qh), "{t:?}");
+                let mt = MassTerms::new(p.get(Trait::BodyMass), p.get(Trait::BodyMass));
+                assert_eq!(
+                    fitness(&q, &pc, &eco, 0.05, 1.3, None, None).to_bits(),
+                    fitness(&q, &pc, &eco, 0.05, 1.3, Some(&mt), Some(&yh)).to_bits()
+                );
+            }
+            let mt = MassTerms::new(p.get(Trait::BodyMass), p.get(Trait::BodyMass));
+            for t in Trait::ALL.into_iter().filter(|&t| t != Trait::BodyMass) {
+                let mut l = latent;
+                l[t as usize] -= 0.3;
+                let q = Phenotype::from_latent(&l);
+                assert_eq!(
+                    fitness(&q, &pc, &eco, 0.05, 1.3, None, None).to_bits(),
+                    fitness(&q, &pc, &eco, 0.05, 1.3, Some(&mt), None).to_bits(),
+                    "{t:?}"
+                );
+            }
+            for t in FITNESS_NEUTRAL {
+                let mut l = latent;
+                l[t as usize] += 0.5;
+                let w2 = fitness(
+                    &Phenotype::from_latent(&l),
+                    &pc,
+                    &eco,
+                    0.05,
+                    1.3,
+                    None,
+                    None,
+                );
+                assert_eq!(w.to_bits(), w2.to_bits(), "{t:?}");
+            }
+        }
+    }
 }

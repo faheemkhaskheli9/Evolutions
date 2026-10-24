@@ -361,7 +361,7 @@ When the replay ends, a message says whether the world is identical to the origi
 - **See a bottleneck:** strike a species with a 90% epidemic, then watch its neutral genetic diversity in the Species tab.
 - **See predator–prey dynamics:** in the Earth-like template, watch the wolf and hare population charts after the wolves arrive in year 40. Abundant hares can sustain enough wolves to wipe out the scarcer deer (apparent competition).
 - **See speciation:** use small isolated populations (**Archipelago**, **Island Dwarfism Lab**) and **Run until… a new species arises** with a 100,000-year cap.
-- **Be patient with deep time:** Population mode runs at roughly 30–70 simulated years per second, depending on world size. 100,000 years takes a few minutes.
+- **Be patient with deep time:** Population mode runs at roughly 40–90 simulated years per second, depending on world size. 100,000 years takes a few minutes.
 - **Strict vs Accelerated:** with **Strict** mutation rates, adaptation relies mostly on the variation founders already carry. That is realistic for short spans, but expect little change in new traits.
 
 For how the biology works under the hood, see the [Technical Requirements](TRD.md). For the architecture, see the [System Design](SYSTEM_DESIGN.md).
