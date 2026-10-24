@@ -181,6 +181,10 @@ export default function App() {
         case "newick":
           downloadBlob(m.text, "phylogeny.nwk", "text/plain");
           break;
+        case "exportedData":
+          for (const f of m.files) downloadBlob(f.text, f.name, f.mime);
+          if (m.files.length > 1) notify(`Exported ${m.files.length} files.`);
+          break;
         case "replayScript":
           downloadBlob(m.text, `evolutions-replay-${Date.now()}.json`, "application/json");
           notify("Replay log exported. Open it to replay the run.");
@@ -523,6 +527,7 @@ export default function App() {
                 founderCount={founderCount}
                 setFounderCount={setFounderCount}
                 onExportReplay={() => client.send({ type: "exportReplay" })}
+                onExportData={(what, species) => client.send({ type: "exportData", what, species })}
                 onReplay={() => client.send({ type: "replay" })}
                 busy={!!progress}
               />

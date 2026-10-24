@@ -318,6 +318,25 @@ The app logs everything you do to a world with its date: interventions, introduc
 
 When the replay ends, a message says whether the world is identical to the original run. It can differ if the log was made by another version of the app, or was edited. Worlds saved by versions without a replay log open normally but cannot be replayed.
 
+### Export data
+
+**Export data** (**World** tab) downloads the run's data for a spreadsheet, R or Python. The files are byte-for-byte the same as the command-line runner writes for the same save (`evo run --load run.evo --years 0 --csv out/ --chronicle chronicle.csv --newick tree.nwk --settings settings.json`).
+
+- **Time series (CSV):** one file per species, named `species_<id>_<name>.csv`, or just the species chosen in the list. One row per metrics sample (sampled regularly, thinned evenly as a run grows long):
+
+  | Column | Meaning |
+  |---|---|
+  | `year` | Simulated year |
+  | `n` | Population size |
+  | `het` | Mean neutral-marker heterozygosity |
+  | `body_mass`, `insulation`, … | Mean of each trait, in the trait's unit (one column per trait, in the order of the Species panel) |
+  | `body_mass_sd`, `insulation_sd`, … | Standard deviation of each trait |
+
+  Extinct species keep their rows up to extinction.
+- **Chronicle (CSV):** columns `year`, `kind` (Info, Founders, Speciation, Extinction, Mode, Intervention, Crash, Adaptation), `species` (id, empty for world events), `species_name` and `text`. Fields with commas or quotes are quoted.
+- **Phylogeny (Newick):** the same file as **Export Newick** in the Tree tab, with branch lengths in years.
+- **Settings (JSON):** the template, seed, realism, world-generator settings and founder groups the world was created with, plus the model version and current year. `founders` is null for worlds saved before replay logs existed.
+
 ---
 
 ## 14. Keyboard and mouse reference

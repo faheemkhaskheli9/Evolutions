@@ -173,6 +173,29 @@ impl Engine {
         self.sim.newick()
     }
 
+    /// Per-species time series as JSON `[{name, text}]`, the same files as `evo run --csv` (PRD FR-O11).
+    pub fn species_csv_files(&self) -> String {
+        serde_json::to_string(
+            &self
+                .sim
+                .species_csv_files()
+                .into_iter()
+                .map(|(name, text)| serde_json::json!({"name": name, "text": text}))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default()
+    }
+
+    /// The Chronicle as CSV, the same file as `evo run --chronicle`.
+    pub fn chronicle_csv(&self) -> String {
+        self.sim.chronicle_csv()
+    }
+
+    /// The world's creation settings as JSON, the same file as `evo run --settings`.
+    pub fn settings_json(&self) -> String {
+        serde_json::to_string_pretty(&self.sim.settings_json()).unwrap_or_default()
+    }
+
     pub fn inspect(&self, id: f64) -> String {
         self.sim.inspect(id as u64).to_string()
     }

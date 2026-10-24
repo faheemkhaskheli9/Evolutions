@@ -62,6 +62,7 @@ In the app:
 - **Run until…** fast-forwards until a new species arises, a species goes extinct, or a population or trait crosses a threshold.
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
 - The **World** tab has map layers and interventions (climate shift, meteor, introduced species, epidemic).
+- **Export data** (World tab) downloads per-species CSV time series, the Chronicle as CSV, the Newick tree and the world settings as JSON: the same files the CLI writes.
 - **Save** and **Open** store whole worlds in `.evo` files. The current world is also autosaved in the browser, and the start dialog offers to resume it.
 
 ### Headless CLI
@@ -70,7 +71,7 @@ In the app:
 cd engine
 cargo run --release -p evo-cli -- list                       # templates and species
 cargo run --release -p evo-cli -- run --template ice_age --seed 7 --years 2000 \
-    --csv out/ --newick out/tree.nwk --out out/run.evo
+    --csv out/ --chronicle out/chronicle.csv --newick out/tree.nwk --settings out/settings.json --out out/run.evo
 cargo run --release -p evo-cli -- info out/run.evo
 ```
 

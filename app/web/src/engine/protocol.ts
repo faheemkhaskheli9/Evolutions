@@ -153,6 +153,40 @@ export interface AutosaveInfo {
   savedAt: number;
 }
 
+/** What the Export data menu downloads (PRD FR-O11). */
+export type ExportKind = "species" | "chronicle" | "newick" | "settings";
+
+export interface ExportFile {
+  name: string;
+  text: string;
+  mime: string;
+}
+
+/**
+ * The files for an export: every species' time series, or only `species` when given;
+ * the Chronicle; the phylogeny; or the world's settings.
+ */
+export function exportFiles(
+  engine: { species_csv_files(): string; chronicle_csv(): string; newick(): string; settings_json(): string },
+  what: ExportKind,
+  species?: number,
+): ExportFile[] {
+  switch (what) {
+    case "species": {
+      const all = JSON.parse(engine.species_csv_files()) as { name: string; text: string }[];
+      // Names start `species_<id>_`, so one species can be picked out by id.
+      const picked = species === undefined ? all : all.filter((f) => f.name.startsWith(`species_${species}_`));
+      return picked.map((f) => ({ ...f, mime: "text/csv" }));
+    }
+    case "chronicle":
+      return [{ name: "chronicle.csv", text: engine.chronicle_csv(), mime: "text/csv" }];
+    case "newick":
+      return [{ name: "phylogeny.nwk", text: engine.newick(), mime: "text/plain" }];
+    case "settings":
+      return [{ name: "settings.json", text: engine.settings_json(), mime: "application/json" }];
+  }
+}
+
 /** When a "run until" fast-forward stops early (PRD FR-T3). */
 export type StopCondition =
   | { kind: "speciation" }
@@ -182,6 +216,8 @@ export type ToWorker =
   | { type: "density"; on: boolean; species: number | null }
   | { type: "save" }
   | { type: "newick" }
+  /** Data files for analysis elsewhere (PRD FR-O11); the same files as the CLI writes. */
+  | { type: "exportData"; what: ExportKind; species?: number }
   /** The current world's replay log as a JSON script (PRD FR-P2). */
   | { type: "exportReplay" }
   /** Replays a JSON script, or the current world from its start when `script` is absent. */
@@ -225,6 +261,7 @@ export type FromWorker =
   | { type: "alleles"; species: number; list: AlleleInfo[] }
   | { type: "saved"; bytes: ArrayBuffer }
   | { type: "newick"; text: string }
+  | { type: "exportedData"; files: ExportFile[] }
   | { type: "replayScript"; text: string }
   | { type: "notice"; message: string }
   | { type: "error"; message: string };

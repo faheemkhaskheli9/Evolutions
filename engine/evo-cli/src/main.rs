@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! evo run --template earth --seed 42 --years 500 --mode auto \
-//!         --out run.evo --csv metrics/ --newick tree.nwk
+//!         --out run.evo --csv metrics/ --chronicle events.csv --newick tree.nwk
 //! evo list
 //! evo info run.evo
 //! ```
@@ -24,8 +24,10 @@ fn usage() -> ! {
       --strict                 literature mutation rates instead of accelerated
       --load <file.evo>        continue a saved run instead of creating one
       --out <file.evo>         save the final state
-      --csv <dir>              write per-species metrics CSV files
+      --csv <dir>              write per-species metrics CSV files (trait means and SDs)
+      --chronicle <file>       write the Chronicle events as CSV
       --newick <file>          write the phylogeny
+      --settings <file>        write the world's creation settings as JSON
       --quiet                  no progress output
       --debug                  print each species' yearly vital rates (Population mode)
   evo info <file.evo>        summarise a save file"
@@ -59,7 +61,9 @@ const RUN_OPTIONS: &[&str] = &[
     "load",
     "out",
     "csv",
+    "chronicle",
     "newick",
+    "settings",
     "quiet",
     "debug",
 ];
@@ -248,28 +252,16 @@ fn main() {
             }
             if let Some(dir) = o.get("csv") {
                 std::fs::create_dir_all(dir).expect("create csv dir");
-                for s in &sim.species.list {
-                    let mut out = String::from("year,n,het");
-                    for t in evo_engine::traits::Trait::ALL {
-                        out.push_str(&format!(",{}", t.info().key));
-                    }
-                    out.push('\n');
-                    for smp in sim
-                        .metrics
-                        .series
-                        .get(&s.id)
-                        .map(|v| v.as_slice())
-                        .unwrap_or(&[])
-                    {
-                        out.push_str(&format!("{:.4},{},{:.4}", smp.year, smp.n, smp.het));
-                        for m in &smp.mean {
-                            out.push_str(&format!(",{m:.5}"));
-                        }
-                        out.push('\n');
-                    }
-                    let path = format!("{dir}/species_{}_{}.csv", s.id, s.name.replace(' ', "_"));
-                    std::fs::write(&path, out).expect("write csv");
+                for (name, out) in sim.species_csv_files() {
+                    std::fs::write(format!("{dir}/{name}"), out).expect("write csv");
                 }
+            }
+            if let Some(path) = o.get("chronicle") {
+                std::fs::write(path, sim.chronicle_csv()).expect("write chronicle");
+            }
+            if let Some(path) = o.get("settings") {
+                let json = serde_json::to_string_pretty(&sim.settings_json()).unwrap();
+                std::fs::write(path, json).expect("write settings");
             }
             if let Some(path) = o.get("newick") {
                 std::fs::write(path, sim.newick()).expect("write newick");

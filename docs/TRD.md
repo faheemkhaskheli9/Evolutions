@@ -325,6 +325,7 @@ $$G_k = \mu_k + \sum_{\ell}\Big[a_{\ell k}(x_1) + a_{\ell k}(x_2)\Big] + \sum_{\
 **TR-DA2** Schema migrations MUST be versioned; newer engines MUST load older saves (read-only for histories if the model changed, with a warning that replay may differ).
 **TR-DA3 Checkpoints.** Automatic checkpoints at increasing spacing (log-scale: recent ones dense, old ones sparse). Default disk budget 2 GB per world, configurable.
 **TR-DA4 Exports.** CSV (metrics, traits, individuals), Newick and NeXML (phylogeny), JSON (templates), PNG (map layers).
+*Implemented:* per-species metrics CSV (`year,n,het`, trait means, then `<trait>_sd`), Chronicle CSV (`year,kind,species,species_name,text`, RFC 4180 quoting), Newick, and the creation settings as JSON (`format: "evolutions-settings"`). The writers live in `evo_engine::export`; the CLI (`--csv`, `--chronicle`, `--newick`, `--settings`) and the browser app (through `evo-wasm`) call the same functions, so their files are byte-identical (`evo-cli/tests/export.rs`).
 **TR-DA5 Templates** are JSON/TOML files validated against a published JSON Schema: world generation parameters or painted heightmap (PNG 16-bit), climate settings, founder species definitions, events schedule.
 
 ## 9. Validation and testing requirements
