@@ -120,6 +120,22 @@ export interface Sample {
   het: number;
 }
 
+/** A polymorphic allele of a species, for the allele-frequency layer (PRD FR-O1). */
+export interface AlleleInfo {
+  /** Permanent allele id. */
+  uid: number;
+  locus: number;
+  kind: "trait" | "incompatibility" | "neutral";
+  /** False for alleles the founders carried; true for mutations that arose in the simulation. */
+  derived: boolean;
+  origin_year: number;
+  dominance: number;
+  /** Effects on traits, on the latent (genetic) scale. */
+  effects: { key: string; label: string; effect: number }[];
+  /** Frequency in the whole species. */
+  freq: number;
+}
+
 export interface TraitRow {
   key: string;
   label: string;
@@ -159,7 +175,9 @@ export type ToWorker =
   | { type: "pick"; x: number; y: number; radius: number }
   | { type: "inspect"; id: number }
   | { type: "speciesDetail"; id: number }
+  /** A map layer: an engine layer name, or `allele:<species>:<uid>` for an allele's frequency. */
   | { type: "layer"; kind: string }
+  | { type: "alleles"; species: number }
   /** Whether the density map layer is shown, and for which species (null = all). */
   | { type: "density"; on: boolean; species: number | null }
   | { type: "save" }
@@ -199,6 +217,7 @@ export type FromWorker =
   | { type: "picked"; id: number }
   | { type: "speciesDetail"; id: number; traits: TraitRow[]; metrics: Sample[] }
   | { type: "layer"; kind: string; data: Float32Array }
+  | { type: "alleles"; species: number; list: AlleleInfo[] }
   | { type: "saved"; bytes: ArrayBuffer }
   | { type: "newick"; text: string }
   | { type: "notice"; message: string }

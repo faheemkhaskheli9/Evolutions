@@ -1,6 +1,7 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import type { Catalog, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
+import type { AlleleInfo, Catalog, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
+import { ALLELE_RAMP } from "../util";
 import type { Layer, Tool } from "./MapView";
 
 interface Props {
@@ -11,6 +12,12 @@ interface Props {
   setLayer: (l: Layer) => void;
   densitySpecies: number | null;
   setDensitySpecies: (id: number | null) => void;
+  alleleSpecies: number | null;
+  setAlleleSpecies: (id: number) => void;
+  /** Polymorphic alleles of `alleleSpecies` (null while loading). */
+  alleles: AlleleInfo[] | null;
+  alleleUid: number | null;
+  setAlleleUid: (uid: number) => void;
   tool: Tool;
   setTool: (t: Tool) => void;
   modeChoice: ModeChoice;
@@ -28,7 +35,21 @@ const LAYERS: { key: Layer; label: string }[] = [
   { key: "rainfall", label: "Rainfall" },
   { key: "vegetation", label: "Vegetation" },
   { key: "population", label: "Population density" },
+  { key: "alleles", label: "Allele frequency" },
 ];
+
+/** "Body mass +0.12 · new (year 1,200) · 34%" */
+export function describeAllele(a: AlleleInfo) {
+  const effects = a.effects.length
+    ? a.effects.map((e) => `${e.label} ${e.effect >= 0 ? "+" : "−"}${Math.abs(e.effect).toPrecision(2)}`).join(", ")
+    : a.kind === "neutral"
+      ? `neutral marker ${a.locus}`
+      : a.kind === "incompatibility"
+        ? `incompatibility locus ${a.locus}`
+        : `locus ${a.locus}, no effect`;
+  const origin = a.derived ? `new (year ${Math.max(0, Math.floor(a.origin_year)).toLocaleString()})` : "founder";
+  return `${effects} · ${origin} · ${(100 * a.freq).toFixed(0)}%`;
+}
 
 export function WorldPanel(p: Props) {
   const [plagueSpecies, setPlagueSpecies] = useState<number | "">("");
@@ -62,6 +83,48 @@ export function WorldPanel(p: Props) {
               ))}
           </select>
         </label>
+      )}
+      {p.layer === "alleles" && (
+        <div className="allele-layer">
+          <label className="row gap small">
+            Species
+            <select value={p.alleleSpecies ?? ""} onChange={(e) => p.setAlleleSpecies(Number(e.target.value))} aria-label="Allele layer species">
+              {p.species
+                .filter((s) => s.extinct_year === null || s.id === p.alleleSpecies)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.common_name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          {p.alleles === null ? (
+            <p className="muted small">Reading the gene pool…</p>
+          ) : p.alleles.length === 0 && p.alleleUid === null ? (
+            <p className="muted small">No allele of this species is between 1% and 99% frequency.</p>
+          ) : (
+            <label className="row gap small">
+              Allele
+              <select value={p.alleleUid ?? ""} onChange={(e) => p.setAlleleUid(Number(e.target.value))} aria-label="Allele">
+                {p.alleleUid !== null && !p.alleles.some((a) => a.uid === p.alleleUid) && <option value={p.alleleUid}>chosen allele (now lost or fixed)</option>}
+                {p.alleles.map((a) => (
+                  <option key={a.uid} value={a.uid}>
+                    {describeAllele(a)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="ramp-legend small" aria-hidden>
+            <span>0%</span>
+            <i style={{ background: `linear-gradient(to right, ${ALLELE_RAMP.map((c) => `rgb(${c.join(",")})`).join(", ")})` }} />
+            <span>100%</span>
+          </div>
+          <p className="muted small">
+            Share of gene copies in each patch that carry this allele. Trait effects are on the genetic scale. Watch a mutation spread, or a cline form along a
+            climate gradient.
+          </p>
+        </div>
       )}
 
       <h3>Simulation detail</h3>

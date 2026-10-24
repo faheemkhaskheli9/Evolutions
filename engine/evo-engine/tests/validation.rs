@@ -767,3 +767,49 @@ fn river_and_lake_layers_are_consistent() {
     }
     assert!(rivers > 0);
 }
+
+/// FR-O1 allele-frequency layer: the listed alleles are polymorphic, the map holds
+/// frequencies where the species lives (and -1 elsewhere), and an allele keeps its
+/// identity and overall frequency across a switch to Population mode.
+#[test]
+fn allele_frequency_layer_tracks_alleles_across_modes() {
+    let mut s = blank(12);
+    s.run_steps(24 * 10);
+    let species = s.animals[0].species;
+    let list = s.allele_list(species, 40);
+    let rows = list.as_array().unwrap();
+    assert!(!rows.is_empty(), "no polymorphic alleles listed");
+    assert_eq!(rows[0]["kind"], "trait", "trait loci come first");
+    for r in rows {
+        let p = r["freq"].as_f64().unwrap();
+        assert!((0.01..=0.99).contains(&p), "allele frequency {p} listed");
+    }
+    let uid = rows[0]["uid"].as_u64().unwrap();
+    let p0 = rows[0]["freq"].as_f64().unwrap();
+    let check_map = |s: &Simulation| {
+        let m = s.allele_frequency(species, uid);
+        assert!(m.iter().all(|&v| v == -1.0 || (0.0..=1.0).contains(&v)));
+        assert!(m.iter().any(|&v| v >= 0.0), "species not on the map");
+        for (i, &v) in m.iter().enumerate() {
+            if v >= 0.0 {
+                assert!(s.world.is_land(i), "frequency on an ocean tile");
+            }
+        }
+    };
+    check_map(&s);
+    s.set_mode(Mode::Population).unwrap();
+    check_map(&s);
+    let after = s.allele_list(species, 1000);
+    let p1 = after
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["uid"].as_u64() == Some(uid))
+        .map(|r| r["freq"].as_f64().unwrap())
+        .expect("allele lost in the mode switch");
+    assert!((p1 - p0).abs() < 0.05, "allele frequency {p0:.3} → {p1:.3}");
+    assert!(s
+        .allele_frequency(species, u64::MAX)
+        .iter()
+        .all(|&v| v == -1.0));
+}

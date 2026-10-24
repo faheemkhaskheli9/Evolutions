@@ -143,6 +143,16 @@ impl Engine {
         })
     }
 
+    /// Polymorphic alleles of a species, as JSON (see `Simulation::allele_list`).
+    pub fn alleles(&self, species: u32) -> String {
+        self.sim.allele_list(species, 40).to_string()
+    }
+
+    /// Frequency of the allele `uid` in `species` per tile; -1 where the species is absent.
+    pub fn allele_frequency(&self, species: u32, uid: f64) -> Vec<f32> {
+        self.sim.allele_frequency(species, uid as u64)
+    }
+
     /// Most abundant species per tile from demes (u32::MAX = none).
     pub fn dominant(&self) -> Vec<u32> {
         self.sim.dominant_species()

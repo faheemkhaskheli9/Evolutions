@@ -95,6 +95,15 @@ export const VEG_RAMP: RGB[] = [
   [30, 110, 40],
 ];
 
+/** Allele frequency, 0 to 1. */
+export const ALLELE_RAMP: RGB[] = [
+  [68, 1, 84],
+  [59, 82, 139],
+  [33, 145, 140],
+  [94, 201, 98],
+  [253, 231, 37],
+];
+
 export function downloadBlob(data: BlobPart, name: string, type = "application/octet-stream") {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement("a");
