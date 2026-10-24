@@ -32,7 +32,6 @@ pub struct Locus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Allele {
     /// Permanent identity (survives allele-table compaction); used for incompatibilities.
-    #[serde(default)]
     pub uid: u64,
     pub locus: u16,
     pub parent: u32,
@@ -44,11 +43,113 @@ pub struct Allele {
     pub derived: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub struct AlleleTable {
     pub alleles: Vec<Allele>,
-    #[serde(default)]
     pub next_uid: u64,
+}
+
+// Saves made before alleles had uids store the table as a bare list of uid-less alleles.
+// bincode ignores `#[serde(default)]`, so that layout needs its own types, chosen with
+// `with_legacy_alleles` while a version 1 save is read (or, in tests, written).
+thread_local! {
+    static LEGACY_ALLELES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with the allele table (de)serialized in the pre-uid layout when `legacy` is set.
+pub(crate) fn with_legacy_alleles<T>(legacy: bool, f: impl FnOnce() -> T) -> T {
+    let before = LEGACY_ALLELES.with(|c| c.replace(legacy));
+    let out = f();
+    LEGACY_ALLELES.with(|c| c.set(before));
+    out
+}
+
+#[derive(Deserialize)]
+struct TableRepr {
+    alleles: Vec<Allele>,
+    next_uid: u64,
+}
+
+#[derive(Serialize)]
+struct TableRef<'a> {
+    alleles: &'a [Allele],
+    next_uid: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LegacyAllele {
+    locus: u16,
+    parent: u32,
+    origin_year: f32,
+    effects: [(u8, f32); 2],
+    dominance: f32,
+    derived: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LegacyTable {
+    alleles: Vec<LegacyAllele>,
+}
+
+impl Serialize for AlleleTable {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if LEGACY_ALLELES.with(|c| c.get()) {
+            LegacyTable {
+                alleles: self
+                    .alleles
+                    .iter()
+                    .map(|a| LegacyAllele {
+                        locus: a.locus,
+                        parent: a.parent,
+                        origin_year: a.origin_year,
+                        effects: a.effects,
+                        dominance: a.dominance,
+                        derived: a.derived,
+                    })
+                    .collect(),
+            }
+            .serialize(s)
+        } else {
+            TableRef {
+                alleles: &self.alleles,
+                next_uid: self.next_uid,
+            }
+            .serialize(s)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AlleleTable {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        if LEGACY_ALLELES.with(|c| c.get()) {
+            // Migration: uids in table order.
+            let t = LegacyTable::deserialize(d)?;
+            let alleles: Vec<Allele> = t
+                .alleles
+                .into_iter()
+                .enumerate()
+                .map(|(i, a)| Allele {
+                    uid: i as u64,
+                    locus: a.locus,
+                    parent: a.parent,
+                    origin_year: a.origin_year,
+                    effects: a.effects,
+                    dominance: a.dominance,
+                    derived: a.derived,
+                })
+                .collect();
+            Ok(AlleleTable {
+                next_uid: alleles.len() as u64,
+                alleles,
+            })
+        } else {
+            let t = TableRepr::deserialize(d)?;
+            Ok(AlleleTable {
+                alleles: t.alleles,
+                next_uid: t.next_uid,
+            })
+        }
+    }
 }
 
 impl AlleleTable {

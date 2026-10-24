@@ -30,7 +30,7 @@ This plan comes from an audit of the engine and app against the PRD and TRD. Ite
 - **Next:** store `cap_of` per deme in predation.
 - **Next:** limit species-check comparisons to nearby demes.
 
-## Phase 4: Missing MVP features (mostly done)
+## Phase 4: Missing MVP features (done)
 
 | Requirement | Status |
 |---|---|
@@ -38,9 +38,9 @@ This plan comes from an audit of the engine and app against the PRD and TRD. Ite
 | **FR-T3** run until | **Done.** **Run until…** in the time bar fast-forwards until a speciation, an extinction, a population (all life or one species) or a species' mean trait crosses a threshold, within a year limit. A condition that already holds runs the full length and says so, instead of stopping at once. |
 | **FR-P1** autosave | **Done.** The worker saves the world to IndexedDB after creating or loading it, after every fast-forward, and once a minute while it changes. At startup the new-world dialog offers **Resume**. Autosave is best-effort: storage errors are ignored. |
 | **FR-O1** per-species map layers | **Done.** The Population density layer has a species selector. This also fixes the layer showing an empty map in Individual mode, because the worker sent density only in Population mode or during a focus. The **Allele frequency** layer shows one allele's frequency per patch (animals and demes pooled; -1 where the species is absent). Its picker lists the species' polymorphic alleles (1–99%), trait loci first, by expected heterozygosity, with their effects, origin and overall frequency. Alleles are named by their permanent `uid`, so a choice survives allele-table compaction and mode switches (`allele_frequency_layer_tracks_alleles_across_modes`). |
-| **FR-P2** replay log | **Next.** Record interventions and mode switches with their timestamps, so a run from the same seed replays identically in the browser. |
+| **FR-P2** replay log | **Done.** `Simulation::set_mode`, `focus_region` and `apply` log each action with its simulated minute (a refused action that changed nothing is not logged; automatic mode switches inside a step are not logged because the replay repeats them). The log and the creation settings are stored after the state in the save (`MODEL_VERSION` 2), as JSON, so they are not part of `state_hash()`. `Replay` recreates the world and applies the log at the recorded times; the JSON replay script carries the end time and the original state hash, so a replay reports whether it is identical (`replay_log_reproduces_the_run`). In the app: **Export replay log**, **Replay from the start**, and **Open** accepts a replay `.json`. |
 
-The e2e smoke test (`app/web/e2e/smoke.mjs`) covers custom settings, a single-species density layer, the allele-frequency layer, **Run until**, and resuming the autosave after a reload.
+The e2e smoke test (`app/web/e2e/smoke.mjs`) covers custom settings, a single-species density layer, the allele-frequency layer, **Run until**, and resuming the autosave after a reload, and exporting the replay log and replaying it to an identical world.
 
 ## Phase 5: Second audit (done)
 
@@ -78,7 +78,7 @@ The user guide is updated to match (speed presets, mode overrides, regions acros
 
 ### Next
 
-- Replay log (FR-P2), as listed in Phase 4.
+- **Done:** replay log (FR-P2), as listed in Phase 4.
 - **Done:** allele-frequency map layer (FR-O1).
-- Old `.evo` files from before the `uid` fields were added do not load: bincode ignores `#[serde(default)]`. Bump `MODEL_VERSION` with the next format change and add a migration.
+- **Done:** old `.evo` files load. Version 1 saves have no replay log; the earliest ones (from the first engine commit) also lack allele uids and `SimParams::dmi_rate_factor`. The loader tries the version 1 layout with uids, then the earliest layout, which gives alleles uids in table order and the current default `dmi_rate_factor`. Tests: a generated version 1 save in both layouts (`version_1_saves_load_and_continue`) and a real save from the first engine commit (`earliest_save_format_loads_and_continue`, `tests/fixtures/v1_pre_uid.evo`).
 - **Done:** `EngineClient` starts its worker on first use and has `terminate()`, which the app calls when it unmounts, so React StrictMode in development no longer leaves a second worker running.

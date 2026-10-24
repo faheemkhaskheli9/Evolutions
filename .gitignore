@@ -6,5 +6,6 @@ app/web/dist/
 app/web/src/wasm/
 # Saves and exports from local runs
 *.evo
+!engine/evo-engine/tests/fixtures/*.evo
 /metrics/
 .DS_Store

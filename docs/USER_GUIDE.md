@@ -18,7 +18,7 @@ All screenshots come from a single run of the Earth-like Continent template, see
 10. [Run until something happens](#10-run-until-something-happens)
 11. [Watch a region in a crowded world](#11-watch-a-region-in-a-crowded-world)
 12. [Change the world (interventions)](#12-change-the-world-interventions)
-13. [Save, open and resume](#13-save-open-and-resume)
+13. [Save, open, resume and replay](#13-save-open-resume-and-replay)
 14. [Keyboard and mouse reference](#14-keyboard-and-mouse-reference)
 15. [Tips for good experiments](#15-tips-for-good-experiments)
 
@@ -298,15 +298,25 @@ At the bottom of the **World** tab, **Deaths so far** breaks down causes of deat
 
 ---
 
-## 13. Save, open and resume
+## 13. Save, open, resume and replay
 
 - **Save** (top bar) downloads the whole world as an `.evo` file: terrain, every genome, populations, species, history and chronicle.
-- **Open** (top bar, or **Open a saved world…** in the Create dialog) loads an `.evo` file and continues exactly where it left off. The same seed and save always continue identically. A damaged file is rejected with a message, and the current world stays open.
+- **Open** (top bar, or **Open a saved world…** in the Create dialog) loads an `.evo` file and continues exactly where it left off. The same seed and save always continue identically. A damaged file is rejected with a message, and the current world stays open. Saves from older versions of the app still open.
 - **Autosave:** the app also keeps your latest world in the browser. It saves when the world is created or opened, after each jump, and once a minute while anything changes (time running, or an intervention while paused). When you come back, the Create dialog offers **Continue where you left off?** with the template, seed, year and save time; click **Resume**.
 
 ![Resume prompt in the Create dialog after reopening the app](guide/23-resume.png)
 
 Autosave is per browser and is lost if you clear site data, so use **Save** for worlds you want to keep or share.
+
+### Replay
+
+The app logs everything you do to a world with its date: interventions, introduced species, mode switches (including the automatic ones for speed and jumps) and watched regions. The log is kept in saves and autosaves.
+
+- **Export replay log** (**World** tab, under **Replay**) downloads a small `.json` file: the world's settings and seed plus the log. It is much smaller than an `.evo` save.
+- **Open** a replay log (top bar or the Create dialog) to rebuild the world from its seed and replay every logged action at its date, up to the date it was exported. A progress card shows the year; **Stop here** cancels and keeps the current world.
+- **Replay from the start** does the same for the current world, as a check.
+
+When the replay ends, a message says whether the world is identical to the original run. It can differ if the log was made by another version of the app, or was edited. Worlds saved by versions without a replay log open normally but cannot be replayed.
 
 ---
 

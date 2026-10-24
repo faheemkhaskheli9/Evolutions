@@ -217,7 +217,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
             Open a saved world…
             <input
               type="file"
-              accept=".evo"
+              accept=".evo,.json"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 e.target.value = "";

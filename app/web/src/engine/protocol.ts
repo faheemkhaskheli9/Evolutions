@@ -181,7 +181,11 @@ export type ToWorker =
   /** Whether the density map layer is shown, and for which species (null = all). */
   | { type: "density"; on: boolean; species: number | null }
   | { type: "save" }
-  | { type: "newick" };
+  | { type: "newick" }
+  /** The current world's replay log as a JSON script (PRD FR-P2). */
+  | { type: "exportReplay" }
+  /** Replays a JSON script, or the current world from its start when `script` is absent. */
+  | { type: "replay"; script?: string };
 
 export interface FrameMsg {
   type: "frame";
@@ -211,7 +215,8 @@ export type FromWorker =
   | { type: "ready"; catalog: Catalog; autosave: AutosaveInfo | null }
   | { type: "created"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array; hydro: Hydrology }
   | FrameMsg
-  | { type: "progress"; done: number; total: number; label: string }
+  /** Long-running work: a jump, or a replay (`title` names it; a jump has none). */
+  | { type: "progress"; done: number; total: number; label: string; title?: string }
   | { type: "jumpDone" }
   | { type: "inspect"; id: number; data: Record<string, unknown> | null }
   | { type: "picked"; id: number }
@@ -220,5 +225,6 @@ export type FromWorker =
   | { type: "alleles"; species: number; list: AlleleInfo[] }
   | { type: "saved"; bytes: ArrayBuffer }
   | { type: "newick"; text: string }
+  | { type: "replayScript"; text: string }
   | { type: "notice"; message: string }
   | { type: "error"; message: string };

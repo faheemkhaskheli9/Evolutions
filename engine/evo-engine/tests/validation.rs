@@ -813,3 +813,114 @@ fn allele_frequency_layer_tracks_alleles_across_modes() {
         .iter()
         .all(|&v| v == -1.0));
 }
+
+/// A run with interventions, mode switches, a focus region and a founder release
+/// replays from its log to the same state (PRD FR-P2), also after a save and load
+/// mid-run and through the JSON replay script.
+#[test]
+fn replay_log_reproduces_the_run() {
+    use evo_engine::sim::Intervention;
+    use evo_engine::{Replay, ReplayScript};
+    let mut s = blank(41);
+    s.run_steps(24 * 5);
+    s.apply(Intervention::ClimateShift { delta_c: -2.0 })
+        .unwrap();
+    s.run_steps(7);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(3.0);
+    s.apply(Intervention::Meteor {
+        fx: 0.3,
+        fy: 0.5,
+        radius: 0.1,
+    })
+    .unwrap();
+    // A refused intervention changes nothing and is not logged.
+    assert!(s
+        .apply(Intervention::ClimateShift { delta_c: 40.0 })
+        .is_err());
+    s.run_years(2.0);
+    s.focus_region(0, 0, 15, 15).unwrap();
+    s.run_steps(30);
+    s.apply(Intervention::AddFounders {
+        group: FounderGroup {
+            species: "hare".into(),
+            count: 20,
+            diversity: 0.5,
+            region: None,
+            delay_years: 0.0,
+        },
+    })
+    .unwrap();
+    s.run_steps(30);
+    // Save and load mid-run: the log travels in the save.
+    let mut s = Simulation::load_bytes(&s.save_bytes().unwrap()).unwrap();
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(2.0);
+    s.apply(Intervention::Plague {
+        species: 0,
+        mortality: 0.3,
+    })
+    .unwrap();
+    s.run_years(1.0);
+    assert_eq!(s.replay.entries.len(), 7);
+
+    let script = s.replay_script().unwrap();
+    let json = serde_json::to_string(&script).unwrap();
+    let r = Replay::run(serde_json::from_str::<ReplayScript>(&json).unwrap()).unwrap();
+    assert!(r.matches());
+    assert_eq!(r.sim.state_hash(), s.state_hash());
+    assert_eq!(r.sim.minutes, s.minutes);
+    assert_eq!(r.sim.replay.entries.len(), s.replay.entries.len());
+    assert_eq!(r.sim.events.len(), s.events.len());
+
+    // A tampered log no longer matches.
+    let mut bad = script.clone();
+    bad.entries.remove(0);
+    assert!(!Replay::run(bad).unwrap().matches());
+}
+
+/// Saves in the version 1 format, with or without allele uids, load and keep
+/// running; they have no replay log.
+#[test]
+fn version_1_saves_load_and_continue() {
+    let mut s = blank(43);
+    s.run_steps(24 * 3);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(2.0);
+    for legacy in [false, true] {
+        let mut old = Simulation::load_bytes(&s.save_bytes_v1(legacy)).unwrap();
+        assert_eq!(old.model_version, evo_engine::sim::MODEL_VERSION);
+        assert_eq!(old.alleles.len(), s.alleles.len());
+        assert!(old.replay.origin.is_none());
+        assert!(old.replay_script().is_err());
+        if legacy {
+            for (i, a) in old.alleles.alleles.iter().enumerate() {
+                assert_eq!(a.uid, i as u64);
+            }
+            assert_eq!(old.alleles.next_uid, old.alleles.len() as u64);
+        } else {
+            assert_eq!(old.state_hash(), s.state_hash());
+        }
+        old.run_years(3.0);
+        assert!(old.year() > 4.9);
+        // Saved again, it uses the current format.
+        let again = Simulation::load_bytes(&old.save_bytes().unwrap()).unwrap();
+        assert_eq!(again.state_hash(), old.state_hash());
+    }
+}
+
+/// A real save from the first engine version (before allele uids and
+/// `dmi_rate_factor`): `evo run --template blank --seed 3 --years 2` at a56431d.
+#[test]
+fn earliest_save_format_loads_and_continues() {
+    let bytes = include_bytes!("fixtures/v1_pre_uid.evo");
+    let mut s = Simulation::load_bytes(bytes).unwrap();
+    assert!((s.year() - 2.0).abs() < 1e-9);
+    assert_eq!(s.species.list.len(), 1);
+    assert_eq!(s.alleles.next_uid, s.alleles.len() as u64);
+    let n = s.population();
+    assert!(n > 1000);
+    s.run_years(2.0);
+    assert!(s.population() > 0);
+    assert!(Simulation::load_bytes(&s.save_bytes().unwrap()).is_ok());
+}

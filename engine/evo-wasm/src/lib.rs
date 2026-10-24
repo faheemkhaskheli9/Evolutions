@@ -1,7 +1,7 @@
 //! WebAssembly bindings: the browser app drives the engine from a Web Worker
 //! through this API (System Design §7). Queries return JSON strings or typed arrays.
 
-use evo_engine::{Intervention, Mode, NewWorld, Simulation};
+use evo_engine::{Intervention, Mode, NewWorld, Replay, ReplayScript, Simulation};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -11,6 +11,55 @@ pub struct Engine {
 
 fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
+}
+
+/// A replay in progress: run it in slices with `advance`, then take the world with `finish`.
+#[wasm_bindgen]
+pub struct ReplayRun {
+    replay: Replay,
+}
+
+#[wasm_bindgen]
+impl ReplayRun {
+    /// Starts replaying a JSON replay script.
+    #[wasm_bindgen(constructor)]
+    pub fn new(script_json: &str) -> Result<ReplayRun, JsError> {
+        let script: ReplayScript = serde_json::from_str(script_json)
+            .map_err(|e| JsError::new(&format!("not an Evolutions replay: {e}")))?;
+        Ok(ReplayRun {
+            replay: Replay::new(script).map_err(err)?,
+        })
+    }
+
+    /// Runs up to `steps` engine steps. Returns true when the replay is complete.
+    pub fn advance(&mut self, steps: u32) -> Result<bool, JsError> {
+        self.replay.advance(steps as u64).map_err(err)
+    }
+
+    /// Fraction replayed (0–1).
+    pub fn progress(&self) -> f64 {
+        self.replay.progress()
+    }
+
+    pub fn year(&self) -> f64 {
+        self.replay.sim.year()
+    }
+
+    pub fn end_year(&self) -> f64 {
+        self.replay.end_year()
+    }
+
+    /// Whether the replayed world is identical to the original run.
+    pub fn matches(&self) -> bool {
+        self.replay.matches()
+    }
+
+    /// The replayed world as an engine.
+    pub fn finish(self) -> Engine {
+        Engine {
+            sim: self.replay.sim,
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -33,6 +82,12 @@ impl Engine {
 
     pub fn save(&self) -> Result<Vec<u8>, JsError> {
         self.sim.save_bytes().map_err(err)
+    }
+
+    /// The world's replay script (creation settings and every action) as JSON (PRD FR-P2).
+    pub fn replay_script(&self) -> Result<String, JsError> {
+        let script = self.sim.replay_script().map_err(err)?;
+        serde_json::to_string_pretty(&script).map_err(err)
     }
 
     /// Templates, species library and trait metadata.
