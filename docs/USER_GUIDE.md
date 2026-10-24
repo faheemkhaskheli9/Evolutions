@@ -97,8 +97,9 @@ Click **Create world** to generate the terrain, climate, rivers and biomes and r
   - the mode badge (**Individual** or **Population**);
   - the number of living organisms and species;
   - **New world**, **Save** and **Open**.
-- **3D world:** the whole simulation in one scene. Mountains rise in relief, seas are translucent water over the sea floor, rivers wind down to the sea (wider where more water flows), lakes lie flat in their basins, and biomes are coloured by type (deserts, grasslands, forests, tundra, ice). Snow covers the ground wherever the day is below freezing, so it spreads and retreats with the seasons. Every animal stands on the ground in its species colour. The world wraps east–west, like a globe.
-  - At slow speeds (up to about **1 hour/s**) day turns to dusk and night, with the sun crossing from east to west. Faster, the light stays at a steady day.
+- **3D world:** the whole simulation in one scene. Mountains rise in relief, seas are translucent water over the sea floor, rivers wind down to the sea (wider where more water flows), lakes lie flat in their basins, and biomes are coloured by type (deserts, grasslands, forests, tundra, ice). Snow covers the ground wherever the day is below freezing, so it spreads and retreats with the seasons. Zoom in and trees and grass appear: conifers in boreal and temperate rainforest, broadleaf trees in other forests and scattered over savanna, grass tufts on open land. Grass thins and dries from green to straw where animals have grazed it down, and comes back as it regrows (plants show on the Terrain and Vegetation layers). Every animal stands on the ground in its species colour. The world wraps east–west, like a globe.
+  - The sun follows the latitude you are looking at and the season: high in summer, low in winter, never setting at midsummer and never rising at midwinter beyond the polar circles.
+  - At slow speeds (up to about **1 hour/s**) day turns to dusk and night, with the sun crossing from east to west. Faster, the light is the day's mid-morning sun, so the seasons still show; it dims during the polar night.
   - Drag to pan, scroll to zoom toward the pointer, and **right-drag** (or **Ctrl + drag**) to orbit and tilt the view.
   - The **3D world / Flat map** switch in the top-right corner changes to a flat top-down map. The app remembers your choice. Browsers without 3D graphics (WebGL) get the flat map automatically.
   - The legend in the bottom-left corner names the species colours.
@@ -113,7 +114,7 @@ Press **▶** (or **Space**). In Individual mode every animal lives hour by hour
 
 ![Zoomed in: hares and deer standing on the terrain](guide/05-individuals-zoomed.png)
 
-**Click an animal** to open the **Inspector**. A yellow ring marks it on the map, and the panel updates live as it lives its life. In the 3D world, **Follow animal** (top right, under the view switch) keeps the camera on it as it moves; you can still zoom and orbit. Dragging the map, choosing another animal, or the animal dying stops following.
+**Click an animal** to open the **Inspector**. A yellow ring marks it on the map, and the panel updates live as it lives its life. In the 3D world, **Follow animal** (top right, under the view switch) keeps the camera on it as it moves; you can still zoom and orbit. Dragging the map, choosing another animal, or the animal dying stops following. A yellow trail shows where it has walked over the last day, fading with age.
 
 ![The Inspector for a steppe hare: current action, energy and hydration, physiology, the tile it stands on, and its phenotype](guide/06-inspector.png)
 

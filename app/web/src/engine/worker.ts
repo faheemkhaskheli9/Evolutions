@@ -19,6 +19,7 @@ let lastTick = performance.now();
 let eventsSent = 0;
 let lastSpeciesPost = 0;
 let lastDensityPost = 0;
+let lastForagePost = 0;
 let slowSince = 0;
 let achieved = 0;
 let capExceeded = false;
@@ -102,6 +103,7 @@ function sendCreated() {
   );
   precip = engine.layer("precip");
   snowDay = NaN;
+  lastForagePost = 0;
   eventsSent = 0;
   lastSpeciesPost = 0;
   achieved = 0;
@@ -144,6 +146,12 @@ function sendFrame(full = false) {
     snowDay = day;
     msg.snow = snowCover(engine);
     transfer.push(msg.snow.buffer);
+  }
+  // Forage changes with grazing and the season; the 3D world thins its plants by it.
+  if (full || now - lastForagePost > 1000) {
+    lastForagePost = now;
+    msg.forage = engine.layer("forage");
+    transfer.push(msg.forage.buffer);
   }
   if (status.mode === "Population" || status.focus || densityOn) {
     if (full || now - lastDensityPost > 300) {

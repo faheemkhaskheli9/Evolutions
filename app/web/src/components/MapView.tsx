@@ -17,6 +17,9 @@ export interface FrameData {
   density?: Float32Array;
   dominant?: Uint32Array;
   snow?: Float32Array;
+  forage?: Float32Array;
+  /** Days since the start (the inspected animal's path keeps the last one). */
+  days?: number;
   /** Day of the year, with the time of day as the fraction. */
   day?: number;
   /** Simulated seconds per real second while playing, 0 while paused. */

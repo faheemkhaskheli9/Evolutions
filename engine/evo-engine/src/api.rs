@@ -44,6 +44,7 @@ impl Simulation {
             "w": self.world.w, "h": self.world.h,
             "tile_km": self.world.tile_km,
             "lat_north": self.world.gen.lat_north, "lat_south": self.world.gen.lat_south,
+            "axial_tilt": self.world.gen.axial_tilt,
             "template": self.template_name, "template_key": self.template_key,
             "seed": self.seed,
             "patch_size": self.params.patch_size,
@@ -58,6 +59,8 @@ impl Simulation {
         json!({
             "year": self.year(),
             "day_of_year": self.day_of_year(),
+            // Days since the start, with the time of day as the fraction.
+            "days": self.minutes as f64 / self.params.day_minutes as f64,
             "hour": (self.minutes % self.params.day_minutes) / 60,
             "mode": match self.mode { Mode::Individual => "Individual", Mode::Population => "Population" },
             "focus": self.focus,

@@ -225,6 +225,79 @@ function flatGeometry(pos: number[]) {
   return g;
 }
 
+/** A geometry with one vertex colour throughout (multiplied by the instance colour). */
+function tinted(geo: THREE.BufferGeometry, rgb: [number, number, number]) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  const n = g.attributes.position.count;
+  const c = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) c.set(rgb, 3 * i);
+  g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+  g.deleteAttribute("uv");
+  return g;
+}
+
+const TRUNK: [number, number, number] = [0.45, 0.32, 0.22];
+
+/** A conifer about 0.3 tiles tall: a cone on a short trunk (16 triangles). */
+function coniferGeometry() {
+  const trunk = tinted(new THREE.CylinderGeometry(0.012, 0.016, 0.06, 4, 1, true).translate(0, 0.03, 0), TRUNK);
+  const crown = tinted(new THREE.ConeGeometry(0.07, 0.26, 6).translate(0, 0.18, 0), [1, 1, 1]);
+  const g = mergeGeometries([trunk, crown])!;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A broadleaf tree about 0.25 tiles tall: a round crown on a trunk (28 triangles). */
+function broadleafGeometry() {
+  const trunk = tinted(new THREE.CylinderGeometry(0.012, 0.018, 0.12, 4, 1, true).translate(0, 0.06, 0), TRUNK);
+  const crown = tinted(new THREE.IcosahedronGeometry(0.08, 0).scale(1, 0.8, 1).translate(0, 0.17, 0), [1, 1, 1]);
+  const g = mergeGeometries([trunk, crown])!;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A tuft of grass: three thin blades (12 triangles). */
+function grassGeometry() {
+  const blades = [-0.6, 0, 0.6].map((a, k) =>
+    tinted(new THREE.ConeGeometry(0.012, 0.07, 4, 1, true).rotateZ(a * 0.5).translate(Math.sin(a) * 0.02, 0.03, (k - 1) * 0.012), [1, 1, 1]),
+  );
+  const g = mergeGeometries(blades)!;
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Plants per tile at full forage, by biome id (the engine's `Biome` order): conifers,
+ * broadleaf trees, grass tufts. Fractions are drawn on some tiles only.
+ */
+const PLANTS: [number, number, number][] = [
+  [0, 0, 0], // ocean
+  [0, 0, 0], // lake
+  [0, 0, 0], // ice
+  [0, 0, 2], // tundra
+  [3, 0, 1], // boreal forest
+  [0, 0, 0.6], // cold desert
+  [0, 0.1, 4], // temperate grassland
+  [0.6, 2.4, 1], // temperate forest
+  [3.5, 0.5, 1], // temperate rainforest
+  [0, 0, 0.3], // hot desert
+  [0, 0.6, 3], // savanna
+  [0, 3, 1], // tropical seasonal forest
+  [0, 4, 0.5], // tropical rainforest
+];
+const DRY_GRASS = new THREE.Color(0.72, 0.62, 0.36);
+const LUSH_GRASS = new THREE.Color(0.3, 0.56, 0.18);
+const CONIFER = new THREE.Color(0.16, 0.36, 0.2);
+const BROADLEAF = new THREE.Color(0.25, 0.5, 0.18);
+/** Plants are drawn when a tile is at least this many pixels across. */
+const PLANT_PX = 10;
+/** Plants are laid out over a square this many tiles from the camera target (at most). */
+const PLANT_RADIUS = 70;
+const PLANT_MAX = 80_000;
+
+/** A number in [0, 1) from an integer, for placing plants the same way every time. */
+const hash01 = (i: number) => ((Math.imul(i ^ (i >>> 15), 2246822519) ^ Math.imul(i, 3266489917)) >>> 0) / 4294967296;
+
 /** Below this on-screen body length (px) animals use the simple geometry. */
 const DETAIL_PX = 16;
 /** Above this many figures, small ones are drawn as sprites rather than meshes. */
@@ -267,7 +340,22 @@ function drawnAt(d: AnimalFrame, i: number, a: number): [number, number] {
 const DAY_SKY = new THREE.Color(0x9cc3e4);
 const DUSK_SKY = new THREE.Color(0xd9906a);
 const NIGHT_SKY = new THREE.Color(0x22345a);
-const DAY_SUN = new THREE.Vector3(-0.6, 1, -0.4);
+/** The path of the inspected animal covers this many days. */
+const PATH_DAYS = 1;
+const PATH_MAX = 4096;
+
+/**
+ * Where the sun is, as east, north and up components of a unit vector, at a latitude
+ * (degrees), solar declination (radians) and hour angle (radians, 0 at noon).
+ */
+function sunVector(lat: number, decl: number, hour: number) {
+  const phi = (lat * Math.PI) / 180;
+  return {
+    east: -Math.cos(decl) * Math.sin(hour),
+    north: Math.cos(phi) * Math.sin(decl) - Math.sin(phi) * Math.cos(decl) * Math.cos(hour),
+    up: Math.sin(phi) * Math.sin(decl) + Math.cos(phi) * Math.cos(decl) * Math.cos(hour),
+  };
+}
 
 export class World3D {
   readonly renderer: THREE.WebGLRenderer;
@@ -307,6 +395,28 @@ export class World3D {
   /** Animal the camera follows, and who to tell when it can no longer be found. */
   private followId: number | null = null;
   onFollowLost: (() => void) | null = null;
+
+  /** Latitude (degrees) of the northern and southern edges, and the axial tilt. */
+  private latN = 60;
+  private latS = -60;
+  private tilt = 23.44;
+  private clock = { day: 0.5, speed: 0 };
+
+  private biome = new Float32Array(1);
+  private waterKind = new Float32Array(1);
+  private forage: Float32Array | null = null;
+  private plantsOn = true;
+  private plantMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  private plantGeos = [coniferGeometry(), broadleafGeometry(), grassGeometry()];
+  private plants: THREE.InstancedMesh[] = [];
+  /** Camera target and detail when plants were last laid out (NaN: lay out again). */
+  private plantAt = { tx: NaN, ty: NaN, radius: 0, full: false };
+
+  private path: { t: number; x: number; y: number }[] = [];
+  private pathLine: THREE.Line;
+  private pathPos = new Float32Array(PATH_MAX * 3);
+  private pathCol = new Float32Array(PATH_MAX * 3);
+  private days = 0;
 
   private hemi = new THREE.HemisphereLight(0xdfefff, 0x4a4030, 1.6);
   private sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
@@ -353,7 +463,6 @@ export class World3D {
 
     this.scene.background = DAY_SKY.clone();
     this.scene.fog = new THREE.Fog(DAY_SKY.clone(), 100, 400);
-    this.sun.position.copy(DAY_SUN);
     this.scene.add(this.hemi, this.sun, this.animalSprites.points, this.herdSprites.points);
     shapeAnimals(this.animalMat, this.time);
 
@@ -368,14 +477,45 @@ export class World3D {
     );
     this.selection.renderOrder = 10;
     this.selection.visible = false;
-    this.scene.add(this.focusBox, this.regionBox, this.selection);
+    const pathGeo = new THREE.BufferGeometry();
+    pathGeo.setAttribute("position", new THREE.BufferAttribute(this.pathPos, 3));
+    pathGeo.setAttribute("color", new THREE.BufferAttribute(this.pathCol, 3));
+    this.pathLine = new THREE.Line(pathGeo, new THREE.LineBasicMaterial({ vertexColors: true, fog: false, depthTest: false, transparent: true }));
+    this.pathLine.renderOrder = 9;
+    this.pathLine.frustumCulled = false;
+    this.pathLine.visible = false;
+    this.plants = this.plantGeos.map((g) => {
+      const m = new THREE.InstancedMesh(g, this.plantMat, PLANT_MAX);
+      m.count = 0;
+      m.frustumCulled = false;
+      // Allocate instance colours up front so the material compiles with them.
+      m.setColorAt(0, new THREE.Color(1, 1, 1));
+      return m;
+    });
+    this.scene.add(this.focusBox, this.regionBox, this.selection, this.pathLine, ...this.plants);
   }
 
   // ---------------------------------------------------------------- world
 
-  setWorld(w: number, h: number, elevation: Float32Array, water: Float32Array, hydro: Hydrology) {
+  setWorld(
+    w: number,
+    h: number,
+    elevation: Float32Array,
+    water: Float32Array,
+    hydro: Hydrology,
+    biome: Float32Array,
+    lat: { north: number; south: number; tilt: number },
+  ) {
     this.w = w;
     this.h = h;
+    this.biome = biome;
+    this.waterKind = water;
+    this.forage = null;
+    this.plantAt.tx = NaN;
+    this.latN = lat.north;
+    this.latS = lat.south;
+    this.tilt = lat.tilt;
+    this.path = [];
     this.heights = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) this.heights[i] = toHeight(elevation[i]);
     for (const m of this.terrain) this.scene.remove(m);
@@ -536,32 +676,52 @@ export class World3D {
   }
 
   /**
-   * Time of day and season from the engine's clock. Night falls only when time runs
-   * slowly enough to see it (up to about an hour per second, fading out by six); faster,
-   * or for the whole year at once, the light stays at a neutral day.
+   * Time of day and season from the engine's clock (`day`: day of the year with the
+   * time of day as the fraction; `days`: days since the start). The light is worked out
+   * when drawing, for the latitude the camera looks at.
    */
-  setClock(day: number, speed: number) {
+  setClock(day: number, speed: number, days = 0) {
+    this.clock.day = day;
+    this.clock.speed = speed;
+    if (days < this.days) this.path = [];
+    this.days = days;
+    this.requestRender();
+  }
+
+  /**
+   * Sun and sky for the season and the latitude at the camera target: the sun is higher
+   * in summer and lower in winter, stays up at midsummer and below the horizon at
+   * midwinter beyond the polar circles. Night falls only when time runs slowly enough to
+   * see it (up to about an hour per second, fading out by six); faster, the light is the
+   * day's mid-morning sun, dimmed where the sun barely rises.
+   */
+  private applyLight() {
+    const { day, speed } = this.clock;
     const strength = speed <= 3600 ? 1 : speed >= 6 * 3600 ? 0 : 1 - Math.log(speed / 3600) / Math.log(6);
-    const t = day - Math.floor(day);
-    const az = t * Math.PI * 2;
-    // Sun height: below the horizon at midnight, highest at noon.
-    const elev = -Math.cos(az) * 0.9 + 0.1;
-    const daylight = THREE.MathUtils.smoothstep(elev, -0.15, 0.3);
-    const dusk = Math.exp(-((elev / 0.18) ** 2)) * strength;
-    const light = 1 - strength * (1 - daylight);
+    const lat = this.latN - (Math.max(0, Math.min(this.h, this.cam.ty)) / this.h) * (this.latN - this.latS);
+    // Solar declination: furthest north at the June solstice (day 172).
+    const decl = ((this.tilt * Math.PI) / 180) * Math.cos((2 * Math.PI * (day - 172)) / 365.25);
+    const now = sunVector(lat, decl, (day - Math.floor(day) - 0.5) * 2 * Math.PI);
+    const morning = sunVector(lat, decl, -Math.PI / 3);
+    const s = {
+      east: morning.east + (now.east - morning.east) * strength,
+      north: morning.north + (now.north - morning.north) * strength,
+      up: morning.up + (now.up - morning.up) * strength,
+    };
+    const daylight = THREE.MathUtils.smoothstep(s.up, -0.1, 0.25);
+    const dusk = Math.exp(-((s.up / 0.15) ** 2)) * strength;
+    const fast = 0.4 + 0.6 * THREE.MathUtils.smoothstep(morning.up, -0.05, 0.35);
+    const light = fast + (daylight - fast) * strength;
     this.sun.intensity = 0.25 + 1.95 * light;
     this.hemi.intensity = 0.75 + 0.85 * light;
-    // Rises in the east, south at noon, sets in the west.
-    // At night the faint light comes from high up, like moonlight.
-    const sunDir = new THREE.Vector3(Math.sin(az) * daylight, Math.max(0.08, elev, 1 - daylight), -Math.cos(az) * 0.5 * daylight).normalize();
-    this.sun.position.copy(DAY_SUN).normalize().lerp(sunDir, strength);
+    // Scene x is east and z is south. At night the faint light comes from high up, like moonlight.
+    this.sun.position.set(s.east * daylight, Math.max(0.08, s.up, 1 - daylight), -s.north * daylight).normalize();
     // Warm at dusk, cool blue at night.
-    const night = strength * (1 - daylight);
+    const night = 1 - light;
     this.sun.color.setRGB(1 - 0.45 * night, 0.96 - 0.25 * dusk - 0.3 * night, 0.88 - 0.4 * dusk + 0.12 * night);
     const sky = NIGHT_SKY.clone().lerp(DAY_SKY, light).lerp(DUSK_SKY, dusk * 0.6);
     (this.scene.background as THREE.Color).copy(sky);
     (this.scene.fog as THREE.Fog).color.copy(sky);
-    this.requestRender();
   }
 
   /** Colours draped over the terrain: one pixel per tile (biomes, a climate layer, ranges). */
@@ -708,8 +868,144 @@ export class World3D {
       for (let i = 0; i < n; i++) d.scale[i] = Math.min(1.6, Math.max(0.7, Math.cbrt(Math.max(1e-3, shape[4 * i]) / ref)));
     }
     this.animalData = d;
+    this.recordPath();
     this.lastSize = -1;
     this.requestRender();
+  }
+
+  /** Add the inspected animal's reported position to its path, and drop what is over a day old. */
+  private recordPath() {
+    const row = this.selectedId !== null ? this.rowOf(this.selectedId) : -1;
+    const path = this.path;
+    if (row >= 0) {
+      const d = this.animalData!;
+      let x = d.pos[2 * row];
+      const y = d.pos[2 * row + 1];
+      const last = path[path.length - 1];
+      if (last) x -= Math.round((x - last.x) / this.w) * this.w;
+      if (!last || Math.abs(x - last.x) + Math.abs(y - last.y) > 0.01) path.push({ t: this.days, x, y });
+      else last.t = this.days;
+    }
+    let drop = 0;
+    while (drop < path.length - 1 && path[drop].t < this.days - PATH_DAYS) drop++;
+    if (path.length - drop > PATH_MAX - 1) drop = path.length - (PATH_MAX - 1);
+    if (drop) path.splice(0, drop);
+  }
+
+  /** Forage per tile (fraction of its maximum): plants are thinned where it has been eaten. */
+  setPlants(forage: Float32Array | undefined, visible: boolean) {
+    if (forage && forage !== this.forage) {
+      this.forage = forage;
+      this.plantAt.tx = NaN;
+    }
+    if (visible !== this.plantsOn) {
+      this.plantsOn = visible;
+      this.plantAt.tx = NaN;
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Trees and grass around the camera target when tiles are large enough on screen:
+   * forest biomes get conifers or broadleaf trees, open land grass tufts. Grass is drawn
+   * in proportion to forage and dries from green to straw as it is grazed; trees thin
+   * more slowly (browsing takes the understory first).
+   */
+  private layoutPlants(tilePx: number) {
+    const on = this.plantsOn && !!this.forage && tilePx >= PLANT_PX;
+    const radius = on ? Math.min(PLANT_RADIUS, Math.ceil(this.cam.distance * 1.3), Math.floor(this.w / 2)) : 0;
+    const full = tilePx >= PLANT_PX * 3;
+    const at = this.plantAt;
+    if (!on && at.radius === 0 && !Number.isNaN(at.tx)) return;
+    const near = Math.abs(this.cam.tx - at.tx) < radius / 4 && Math.abs(this.cam.ty - at.ty) < radius / 4;
+    if (near && radius <= at.radius && radius >= at.radius * 0.6 && full === at.full) return;
+    at.tx = this.cam.tx;
+    at.ty = this.cam.ty;
+    at.radius = radius;
+    at.full = full;
+    const counts = [0, 0, 0];
+    if (on) {
+      const { w, h } = this;
+      const forage = this.forage!;
+      // Far away, half the plants: they are small on screen and many.
+      const keep = full ? 1 : 0.5;
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const sc = new THREE.Vector3();
+      const p = new THREE.Vector3();
+      const up = new THREE.Vector3(0, 1, 0);
+      const c = new THREE.Color();
+      const cx = Math.floor(this.cam.tx);
+      const cy = Math.floor(this.cam.ty);
+      for (let y = Math.max(0, cy - radius); y < Math.min(h, cy + radius); y++) {
+        for (let ux = cx - radius; ux < cx + radius; ux++) {
+          const x = ((ux % w) + w) % w;
+          const i = y * w + x;
+          const f = forage[i];
+          if (f < 0 || this.waterKind[i] !== 0) continue;
+          const kinds = PLANTS[this.biome[i]] ?? PLANTS[0];
+          for (let kind = 0; kind < 3; kind++) {
+            const n = kinds[kind];
+            if (!n) continue;
+            // Grass grows with forage; trees keep at least half their number.
+            const share = kind === 2 ? f : 0.5 + 0.5 * f;
+            for (let j = 0; j < Math.ceil(n); j++) {
+              const seed = (i * 16 + kind * 5 + j) | 0;
+              if (hash01(seed) >= Math.min(1, n - j) * share * keep) continue;
+              if (counts[kind] >= PLANT_MAX) continue;
+              const px = ux + 0.1 + 0.8 * hash01(seed ^ 0x51ed);
+              const py = y + 0.1 + 0.8 * hash01(seed ^ 0x9e37);
+              const big = 0.75 + 0.5 * hash01(seed ^ 0x2c1b);
+              q.setFromAxisAngle(up, hash01(seed ^ 0x7f4a) * Math.PI * 2);
+              sc.set(big, kind === 2 ? 0.6 + 0.6 * f : big, big);
+              p.set(px, this.heightAt(px, py) - 0.005, py);
+              this.plants[kind].setMatrixAt(counts[kind], m.compose(p, q, sc));
+              if (kind === 2) c.copy(DRY_GRASS).lerp(LUSH_GRASS, f);
+              else c.copy(kind === 0 ? CONIFER : BROADLEAF).multiplyScalar(0.85 + 0.3 * hash01(seed ^ 0x33));
+              this.plants[kind].setColorAt(counts[kind]++, c);
+            }
+          }
+        }
+      }
+    }
+    this.plants.forEach((mesh, k) => {
+      mesh.count = counts[k];
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    });
+  }
+
+  /** The inspected animal's path over the last day, ending where it is drawn now. */
+  private drawPath(sel: [number, number] | null) {
+    const path = this.path;
+    if (!sel || path.length < 1) {
+      this.pathLine.visible = false;
+      return;
+    }
+    const last = path[path.length - 1];
+    // Draw on the world copy nearest the camera, joined to the animal as drawn.
+    const endX = sel[0] - Math.round((sel[0] - last.x) / this.w) * this.w;
+    const shift = this.nearest(endX) - endX;
+    const n = path.length + 1;
+    const t0 = path[0].t;
+    const span = Math.max(1e-6, this.days - t0);
+    for (let k = 0; k < n; k++) {
+      const pt = k < path.length ? path[k] : { t: this.days, x: endX, y: sel[1] };
+      const x = pt.x + shift;
+      this.pathPos[3 * k] = x;
+      this.pathPos[3 * k + 1] = this.heightAt(x, pt.y) + 0.03;
+      this.pathPos[3 * k + 2] = pt.y;
+      // Older stretches fade towards the ground colour.
+      const a = 0.25 + 0.75 * Math.max(0, Math.min(1, (pt.t - t0) / span));
+      this.pathCol[3 * k] = a;
+      this.pathCol[3 * k + 1] = 0.84 * a;
+      this.pathCol[3 * k + 2] = 0.29 * a;
+    }
+    const g = this.pathLine.geometry;
+    g.setDrawRange(0, n);
+    g.attributes.position.needsUpdate = true;
+    g.attributes.color.needsUpdate = true;
+    this.pathLine.visible = n >= 2;
   }
 
   /** Keep the camera on an animal (null stops); `onFollowLost` fires if it disappears. */
@@ -839,8 +1135,11 @@ export class World3D {
 
   /** The inspected animal: its last reported position, and its id to track it smoothly. */
   setSelected(p: { x: number; y: number } | null, id: number | null = null) {
+    const nextId = p ? id : null;
+    if (nextId !== this.selectedId) this.path = [];
     this.selected = p;
-    this.selectedId = p ? id : null;
+    this.selectedId = nextId;
+    if (this.path.length === 0) this.recordPath();
     this.requestRender();
   }
 
@@ -1105,7 +1404,9 @@ export class World3D {
       }
     }
     this.updateCamera();
+    this.applyLight();
     const upp = this.unitsPerPixel();
+    this.layoutPlants(1 / upp);
     // Bodies are at least ~9 px long so a herd stays visible from far away.
     const size = Math.min(4, Math.max(0.12, 9 * upp));
     const detailed = size / upp >= DETAIL_PX;
@@ -1131,6 +1432,7 @@ export class World3D {
     } else {
       this.selection.visible = false;
     }
+    this.drawPath(sel as [number, number] | null);
     this.renderer.render(this.scene, this.camera);
     // Keep drawing while animals walk: positions ease between updates and legs swing.
     let walking = false;
@@ -1154,6 +1456,9 @@ export class World3D {
     this.simpleGeo.dispose();
     this.barGeo.dispose();
     this.bars?.dispose();
+    for (const m of this.plants) m.dispose();
+    for (const g of this.plantGeos) g.dispose();
+    this.pathLine.geometry.dispose();
     this.renderer.dispose();
   }
 }

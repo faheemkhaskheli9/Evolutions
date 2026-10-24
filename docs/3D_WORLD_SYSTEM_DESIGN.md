@@ -71,7 +71,9 @@ Rendering is on demand: nothing redraws while the simulation is paused and the c
 | Watched region | `LineSegments` (box edges), white | |
 | Region preview | `LineSegments`, yellow | While dragging. |
 | Selection | `Mesh` (ring), drawn on top | Radius scales with zoom. |
-| Lights | `HemisphereLight` + `DirectionalLight` | Sun from the north-west. |
+| Lights | `HemisphereLight` + `DirectionalLight` | Sun placed from the latitude at the camera target, the solar declination for the day of the year (axial tilt from `world_info`) and the time of day. |
+| Plants | Three `InstancedMesh`es (conifer, broadleaf, grass) | Laid out around the camera target when a tile is at least 10 px across; count per tile from the biome, thinned by the `forage` layer sent about once a second. |
+| Path | `Line` with vertex colours | The inspected animal's reported positions over the last simulated day (`status.days`), fading with age. |
 | Atmosphere | Background colour + `Fog` | Fog distances scale with camera distance. |
 
 ### 4.1 Heights
