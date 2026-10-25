@@ -29,6 +29,7 @@ pub mod individual;
 pub mod noise;
 pub mod params;
 pub mod physiology;
+pub mod popgen;
 pub mod population;
 pub mod record;
 pub mod replay;

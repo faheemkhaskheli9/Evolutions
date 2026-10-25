@@ -54,12 +54,46 @@ impl Simulation {
         out
     }
 
-    /// Every species' time series as (file name, contents), in species order.
+    /// One species' population-genetics measures over time (PRD FR-O7): year, expected
+    /// heterozygosity of the species (`ht`) and within patches (`hs`), `fst`, Nₑ from the
+    /// adult sex ratio (`ne`) and from the loss of heterozygosity (`ne_h`, empty when it
+    /// cannot be estimated), the generation time used for it, and segregating alleles.
+    pub fn popgen_csv(&self, species: u32) -> String {
+        let mut out = String::from("year,ht,hs,fst,ne,ne_h,generation_years,segregating_alleles\n");
+        for g in self
+            .popgen
+            .series
+            .get(&species)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+        {
+            let ne_h = if g.ne_h >= 0.0 {
+                format!("{:.1}", g.ne_h)
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "{:.4},{:.4},{:.4},{:.4},{:.1},{},{:.2},{}\n",
+                g.year, g.ht, g.hs, g.fst, g.ne, ne_h, g.generation, g.segregating
+            ));
+        }
+        out
+    }
+
+    /// Every species' time series as (file name, contents), in species order: the
+    /// metrics file, then the population-genetics file (`species_<id>_<name>_popgen.csv`).
     pub fn species_csv_files(&self) -> Vec<(String, String)> {
         self.species
             .list
             .iter()
-            .map(|s| (self.species_csv_name(s.id), self.species_csv(s.id)))
+            .flat_map(|s| {
+                let name = self.species_csv_name(s.id);
+                let popgen = name.replace(".csv", "_popgen.csv");
+                [
+                    (name, self.species_csv(s.id)),
+                    (popgen, self.popgen_csv(s.id)),
+                ]
+            })
             .collect()
     }
 

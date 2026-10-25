@@ -535,7 +535,11 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         if (engine) {
           const traits = JSON.parse(engine.trait_table(m.id));
           // null: the species id belongs to a world that has since been replaced.
-          if (traits) post({ type: "speciesDetail", id: m.id, traits, metrics: JSON.parse(engine.metrics(m.id)) });
+          if (traits) {
+            const uids = m.uids ?? [];
+            const popgen = JSON.parse(engine.popgen(m.id, new Float64Array(uids)));
+            post({ type: "speciesDetail", id: m.id, traits, metrics: JSON.parse(engine.metrics(m.id)), popgen, uids });
+          }
         }
         break;
       case "layer":

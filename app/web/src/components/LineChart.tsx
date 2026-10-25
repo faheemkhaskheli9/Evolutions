@@ -15,6 +15,8 @@ interface Props {
   yLabel?: string;
   xLabel?: string;
   log?: boolean;
+  /** Name the series under the chart when there are several (default true). */
+  legend?: boolean;
 }
 
 /** Round tick values (1, 2 or 5 × 10ⁿ apart) covering [min, max], about `count` of them. */
@@ -66,7 +68,7 @@ export function xTickLabel(t: number, span: number): string {
 }
 
 /** Small dependency-free SVG line chart with axes and a hover read-out. */
-export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log = false }: Props) {
+export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log = false, legend = true }: Props) {
   const width = 340;
   const pad = { l: 46, r: 10, t: 10, b: 26 };
   const [hover, setHover] = useState<number | null>(null);
@@ -133,6 +135,12 @@ export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log =
           hoverRows.map((r) => (
             <span key={r.name}>
               <i style={{ background: r.color }} /> {r.name}: <b>{fmt(r.p[1])}</b> at {xLabel.toLowerCase()} {fmt(r.p[0], 1)}
+            </span>
+          ))
+        ) : legend && series.length > 1 ? (
+          series.map((s) => (
+            <span key={s.name}>
+              <i style={{ background: s.color }} /> {s.name}
             </span>
           ))
         ) : (
