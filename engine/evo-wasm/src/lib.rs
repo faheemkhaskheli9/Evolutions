@@ -181,6 +181,18 @@ impl Engine {
         self.sim.events_json(since as usize).to_string()
     }
 
+    /// The "Why?" explanation of the event at `index` as JSON, or "null".
+    pub fn why(&self, index: u32) -> String {
+        self.sim.why_json(index as usize).to_string()
+    }
+
+    /// Explains the change in a species' trait (by key) between two years, as JSON.
+    pub fn explain_trait(&self, species: u32, key: &str, from: f64, to: f64) -> String {
+        self.sim
+            .explain_trait_json(species, key, from, to)
+            .to_string()
+    }
+
     pub fn newick(&self) -> String {
         self.sim.newick()
     }

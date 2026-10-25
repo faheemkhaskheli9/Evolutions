@@ -64,6 +64,7 @@ In the app:
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
 - The **World** tab has map layers and interventions (climate shift, meteor, introduced species, epidemic).
 - The **Species** tab charts population, traits and population genetics: heterozygosity, F_ST between patches, effective population size, segregating alleles and chosen allele frequencies over time.
+- **Why?** on a Chronicle event explains in plain language what caused it: whether a trait change is selection or drift (compared with what drift would give at the species' effective size) and which hazard drives it; the hazard that grew before a crash or extinction and the matching cause (food, a new predator, climate, an intervention); and, for a new species, the barrier and the isolation factor that mattered most. The Species tab can explain any charted trait the same way.
 - **Export data** (World tab) downloads per-species CSV time series (traits, and population genetics), the Chronicle as CSV, the Newick tree and the world settings as JSON: the same files the CLI writes.
 - **Save** and **Open** store whole worlds in `.evo` files. The current world is also autosaved in the browser, and the start dialog offers to resume it.
 
@@ -73,11 +74,11 @@ In the app:
 cd engine
 cargo run --release -p evo-cli -- list                       # templates and species
 cargo run --release -p evo-cli -- run --template ice_age --seed 7 --years 2000 \
-    --csv out/ --chronicle out/chronicle.csv --newick out/tree.nwk --settings out/settings.json --out out/run.evo
+    --csv out/ --chronicle out/chronicle.csv --newick out/tree.nwk --settings out/settings.json --why out/why.json --out out/run.evo
 cargo run --release -p evo-cli -- info out/run.evo
 ```
 
-`--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity), which is useful for understanding *why* a population grows or declines.
+`--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
 
 ## What is simulated
 
@@ -107,10 +108,11 @@ cargo run --release -p evo-cli -- info out/run.evo
 | V-G6 Haldane | Recombination fraction matches Haldane's map function |
 | Determinism, save/load, rewind | Same seed gives the same history; a reloaded world, or one rewound to a checkpoint, continues identically |
 | V-P1 Transitions | Individual ↔ Population switches conserve abundance, mean genetic values and diversity |
+| "Why?": drift or selection | For traits nothing selects on, change ÷ expected drift SD has mean square ≈ 1 over 120 tests; in a small Blank Slate population those changes are reported as drift; in Ice Age, hares' insulation rise is reported as selection by cold stress |
 
 `cargo test --release -- --ignored` also runs the long ecological tests:
 - **V-B1 cold-adaptation cline:** from the same founders, northern hares evolve thicker insulation than southern ones; this holds in 5/5 seeds.
-- **V-S1 allopatric speciation:** populations separated by straits accumulate incompatibilities and are detected as separate species.
+- **V-S1 allopatric speciation:** populations separated by straits accumulate incompatibilities and are detected as separate species, and the "Why?" names the open water and the main isolation factor.
 
 The browser app has, in `app/web/`:
 - **Unit tests** (Vitest, under a second): `npm test`. They cover formatting and colour ramps, chart ticks, map-layer pixels, the engine client, autosave (with a fake IndexedDB), and a regression test for each unit-testable web bug from the audits.
@@ -130,7 +132,6 @@ This version implements the must-have scope of the PRD, plus several later items
 | ECS (`bevy_ecs`), FlatBuffers, SQLite saves, Tauri desktop shell | Plain Rust structs; JSON plus typed arrays between worker and UI; bincode `.evo` saves; browser app only | These keep the MVP small. The engine API is ready to be wrapped by a desktop shell. |
 | Hominin traits (bipedalism, culture, pigmentation) | Hominins and apes use the general trait set (brain size, sociality, sweating, diet …) | Cultural evolution and hominin-specific traits are planned (PRD §7.5, P1). |
 | Disease with pathogen genomes | Epidemics as an intervention only | Planned (P1). |
-| "Why?" explanations | Per-deme vital-rate diagnostics (CLI `--debug`, WASM `diagnostics()`) | Plain-language explanations in the UI are planned. |
 
 **Modelling notes**
 - **Population scale:** a tile is tens to hundreds of kilometres wide for climate, while `habitat_m2_per_tile` sets how many animals it supports. Absolute numbers are scaled down; ratios and dynamics are what matter.

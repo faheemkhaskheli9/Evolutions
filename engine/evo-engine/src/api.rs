@@ -146,8 +146,53 @@ impl Simulation {
         )
     }
 
+    /// Events from index `since`; each has `why: true` when it has an explanation.
     pub fn events_json(&self, since: usize) -> Value {
-        serde_json::to_value(&self.events[since.min(self.events.len())..]).unwrap_or(json!([]))
+        let since = since.min(self.events.len());
+        let mut v = serde_json::to_value(&self.events[since..]).unwrap_or(json!([]));
+        if let Value::Array(list) = &mut v {
+            for (k, e) in list.iter_mut().enumerate() {
+                if self.insight.why.contains_key(&((since + k) as u32)) {
+                    e["why"] = json!(true);
+                }
+            }
+        }
+        v
+    }
+
+    /// The "Why?" explanation of the event at `index` (PRD FR-O8), or null.
+    pub fn why_json(&self, index: usize) -> Value {
+        self.insight
+            .why
+            .get(&(index as u32))
+            .and_then(|w| serde_json::to_value(w).ok())
+            .unwrap_or(Value::Null)
+    }
+
+    /// Every event explanation, with its event: [{index, event, why}].
+    pub fn explanations_json(&self) -> Value {
+        Value::Array(
+            self.insight
+                .why
+                .iter()
+                .filter_map(|(&i, w)| {
+                    let e = self.events.get(i as usize)?;
+                    Some(json!({ "index": i, "event": e, "why": w }))
+                })
+                .collect(),
+        )
+    }
+
+    /// Explains the change in a trait (by key) of a species between two years: drift
+    /// or selection, and the hazard behind it. Null for an unknown species or trait.
+    pub fn explain_trait_json(&self, species: u32, key: &str, from: f64, to: f64) -> Value {
+        let Some(t) = Trait::ALL.iter().find(|t| t.info().key == key) else {
+            return Value::Null;
+        };
+        if species as usize >= self.species.list.len() {
+            return Value::Null;
+        }
+        serde_json::to_value(self.explain_trait(species, *t, from, to)).unwrap_or(Value::Null)
     }
 
     /// Phylogeny as Newick (PRD FR-O5): branch lengths in years.

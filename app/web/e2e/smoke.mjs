@@ -109,11 +109,27 @@ try {
     await page.getByRole("tab", { name: "Species" }).click();
     await page.getByText("Population", { exact: true }).first().waitFor();
   });
+  await step("why did a trait change: selection or drift", async () => {
+    await page.getByRole("button", { name: /^Why did .* change\?/ }).click();
+    await page.locator(".trait-why .why-verdict").waitFor({ timeout: 20000 });
+    const text = await page.locator(".trait-why .why").innerText();
+    if (!/drift/i.test(text)) throw new Error(`trait explanation: ${text}`);
+  });
   await step("tree and chronicle render", async () => {
     await page.getByRole("tab", { name: "Tree" }).click();
     await page.locator("svg.phylo").waitFor();
     await page.getByRole("tab", { name: /Chronicle/ }).click();
     await page.locator(".events li").first().waitFor();
+  });
+  await step("why? on a chronicle event", async () => {
+    await page.locator(".ev-why").first().click();
+    await page.locator(".events .why p").first().waitFor({ timeout: 20000 });
+    const text = await page.locator(".events .why").first().innerText();
+    if (text.length < 40) throw new Error(`event explanation: ${text}`);
+    // The chart link leaves the Chronicle for the Species panel or the tree.
+    await page.locator(".events .why button.link").first().click();
+    await page.locator('[role="tab"][aria-selected="true"]', { hasText: /Species|Tree/ }).waitFor();
+    await page.getByRole("tab", { name: /Chronicle/ }).click();
   });
   await step("population layer for one species", async () => {
     await page.getByRole("tab", { name: "World" }).click();

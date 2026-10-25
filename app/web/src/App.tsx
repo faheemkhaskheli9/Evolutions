@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
-import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, Why, WorldInfo } from "./engine/protocol";
 import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
 import { PhyloTree } from "./components/PhyloTree";
 import { EventsPanel } from "./components/EventsPanel";
+import { chartTarget } from "./components/why";
 import { Inspector } from "./components/Inspector";
 import { WorldPanel } from "./components/WorldPanel";
 import { NewWorldDialog } from "./components/NewWorldDialog";
@@ -53,6 +54,12 @@ export default function App() {
   const [checkpoints, setCheckpoints] = useState<{ list: CheckpointInfo[]; bytes: number; budget: number }>({ list: [], bytes: 0, budget: 0 });
   const [tab, setTab] = useState<Tab>("species");
   const [selectedSpecies, setSelectedSpecies] = useState<number | null>(null);
+  /** The trait the Species panel charts. */
+  const [chartTrait, setChartTrait] = useState("body_mass");
+  /** "Why?" explanations received, by event index (PRD FR-O8). */
+  const [whys, setWhys] = useState<Record<number, Why | null>>({});
+  /** The explanation of the charted trait's change; data null while it is worked out. */
+  const [traitWhy, setTraitWhy] = useState<{ species: number; key: string; data: Why | null } | null>(null);
   const [detail, setDetail] = useState<SpeciesDetail | null>(null);
   /** Alleles whose trajectories the Species panel charts, per species. */
   const [trackUids, setTrackUids] = useState<Record<number, number[]>>({});
@@ -97,6 +104,8 @@ export default function App() {
         case "created":
           setWorld({ info: m.world, elevation: m.elevation, biome: m.biome, water: m.water, hydro: m.hydro });
           setEvents([]);
+          setWhys({});
+          setTraitWhy(null);
           setSpecies([]);
           setSelectedSpecies(null);
           setInspectId(null);
@@ -181,6 +190,12 @@ export default function App() {
           break;
         case "alleles":
           setAlleles((a) => ({ ...a, [m.species]: m.list }));
+          break;
+        case "why":
+          setWhys((w) => ({ ...w, [m.index]: m.data }));
+          break;
+        case "traitWhy":
+          setTraitWhy((t) => (t && t.species === m.species && t.key === m.key ? { ...t, data: m.data } : t));
           break;
         case "saved":
           downloadBlob(m.bytes, `evolutions-${Date.now()}.evo`);
@@ -389,6 +404,25 @@ export default function App() {
     );
   }
 
+  // A "Why?" panel's chart link: the species, and the chart that shows the answer.
+  const showChart = (why: Why) => {
+    const target = chartTarget(why.chart);
+    if (!target) return;
+    setSelectedSpecies(why.species);
+    if (target.tab === "species" && target.trait) {
+      setChartTrait(target.trait);
+      setTraitWhy(null);
+    }
+    setTab(target.tab);
+  };
+  const explainTrait = (key: string) => {
+    const sp = species.find((s) => s.id === selectedSpecies);
+    if (!sp) return;
+    setTraitWhy({ species: sp.id, key, data: null });
+    client.send({ type: "explainTrait", species: sp.id, key, from: sp.origin_year });
+  };
+  const shownTraitWhy = traitWhy && traitWhy.species === selectedSpecies && traitWhy.key === chartTrait ? traitWhy.data : undefined;
+
   return (
     <div className="app">
       <header className="topbar">
@@ -512,6 +546,10 @@ export default function App() {
                 alleles={selectedSpecies !== null ? (alleles[selectedSpecies] ?? null) : null}
                 trackUids={selectedUids ?? []}
                 setTrackUids={(uids) => selectedSpecies !== null && setTrackUids((t) => ({ ...t, [selectedSpecies]: uids }))}
+                trait={chartTrait}
+                setTrait={setChartTrait}
+                traitWhy={shownTraitWhy}
+                onExplainTrait={explainTrait}
               />
             )}
             {tab === "tree" && (
@@ -531,6 +569,9 @@ export default function App() {
                 events={events}
                 species={species}
                 onRewindBefore={progress ? undefined : (index) => client.send({ type: "rewindBefore", event: index })}
+                whys={whys}
+                onWhy={(index) => client.send({ type: "why", index })}
+                onShowChart={showChart}
                 onSelectSpecies={(id) => {
                   setSelectedSpecies(id);
                   setTab("species");
