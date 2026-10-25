@@ -114,6 +114,27 @@ export interface SimEvent {
   text: string;
   /** Position in the world's chronicle (added by the worker). */
   index?: number;
+  /** True when the engine recorded a "Why?" explanation for it (PRD FR-O8). */
+  why?: boolean;
+}
+
+/** A "Why?" explanation of an event or a trait change (PRD FR-O8). */
+export interface Why {
+  kind: "trait" | "crash" | "extinction" | "speciation";
+  species: number;
+  year: number;
+  /** Plain-language answer. */
+  summary: string;
+  /** Supporting points, one sentence each. */
+  points: string[];
+  /** (label, value) pairs behind the answer. */
+  numbers: [string, string][];
+  /** Trait changes: drift or selection. */
+  verdict: "selection" | "drift" | "mixed" | null;
+  /** Main cause: a hazard ("cold stress", …), "food", "predator", "climate", "intervention", "reproduction", "allopatric", "parapatric", … */
+  cause: string | null;
+  /** The chart that shows it: "trait:<key>", "population", "popgen" or "tree". */
+  chart: string | null;
 }
 
 export interface Sample {
@@ -248,6 +269,10 @@ export type ToWorker =
   /** A map layer: an engine layer name, or `allele:<species>:<uid>` for an allele's frequency. */
   | { type: "layer"; kind: string }
   | { type: "alleles"; species: number }
+  /** The explanation of the event at `index`. */
+  | { type: "why"; index: number }
+  /** Explains a species' change in a trait from year `from` to now. */
+  | { type: "explainTrait"; species: number; key: string; from: number }
   /** Whether the density map layer is shown, and for which species (null = all). */
   | { type: "density"; on: boolean; species: number | null }
   | { type: "save" }
@@ -301,6 +326,8 @@ export type FromWorker =
   | { type: "speciesDetail"; id: number; traits: TraitRow[]; metrics: Sample[]; popgen: GenSample[]; uids: number[] }
   | { type: "layer"; kind: string; data: Float32Array }
   | { type: "alleles"; species: number; list: AlleleInfo[] }
+  | { type: "why"; index: number; data: Why | null }
+  | { type: "traitWhy"; species: number; key: string; data: Why | null }
   | { type: "saved"; bytes: ArrayBuffer }
   | { type: "newick"; text: string }
   | { type: "exportedData"; files: ExportFile[] }

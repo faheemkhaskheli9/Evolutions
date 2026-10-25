@@ -23,6 +23,7 @@
 
 pub mod animal;
 pub mod api;
+pub mod explain;
 pub mod export;
 pub mod genetics;
 pub mod individual;

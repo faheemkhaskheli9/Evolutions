@@ -142,6 +142,19 @@ pub fn compatibility(a: &PopSummary, b: &PopSummary, seed: u64, p: f64, s: f64) 
     if a.arch != b.arch {
         return 0.0;
     }
+    let (viability, mating, timing) = compatibility_parts(a, b, seed, p, s);
+    viability * mating * timing
+}
+
+/// The three factors of `compatibility` (same architecture assumed): hybrid viability
+/// (incompatibilities), mutual mate acceptance and breeding-season overlap.
+pub fn compatibility_parts(
+    a: &PopSummary,
+    b: &PopSummary,
+    seed: u64,
+    p: f64,
+    s: f64,
+) -> (f64, f64, f64) {
     let mut expected = 0.0f64;
     for &(la, xa, fa) in &a.dmi {
         for &(lb, xb, fb) in &b.dmi {
@@ -158,7 +171,45 @@ pub fn compatibility(a: &PopSummary, b: &PopSummary, seed: u64, p: f64, s: f64) 
     let mating = rel(a, b).min(rel(b, a));
     let d = year_distance(a.breeding_day, b.breeding_day) as f64;
     let timing = (-(d / 0.15).powi(2)).exp();
-    viability * mating * timing
+    (viability, mating, timing)
+}
+
+/// One summary for several populations of a species: allele frequencies and trait
+/// means weighted by population size.
+pub fn merge_summaries(pops: &[&PopSummary]) -> Option<PopSummary> {
+    let first = pops.first()?;
+    let n: f64 = pops.iter().map(|p| p.n as f64).sum::<f64>().max(1.0);
+    let mut dmi: BTreeMap<(u16, u64), f64> = BTreeMap::new();
+    let (mut orn, mut pref, mut choosy) = (0.0, 0.0, 0.0);
+    // Breeding day is a time of year: averaged on a circle.
+    let (mut bs, mut bc) = (0.0f64, 0.0f64);
+    for p in pops {
+        let w = p.n as f64 / n;
+        for &(l, x, f) in &p.dmi {
+            *dmi.entry((l, x)).or_default() += w * f as f64;
+        }
+        orn += w * p.ornament as f64;
+        pref += w * p.preference as f64;
+        choosy += w * p.choosiness as f64;
+        let (sin, cos) = (std::f64::consts::TAU * p.breeding_day as f64).sin_cos();
+        bs += w * sin;
+        bc += w * cos;
+    }
+    Some(PopSummary {
+        key: first.key,
+        species: first.species,
+        arch: first.arch,
+        patch: first.patch,
+        n: n as u32,
+        dmi: dmi
+            .into_iter()
+            .map(|((l, x), f)| (l, x, f as f32))
+            .collect(),
+        ornament: orn as f32,
+        preference: pref as f32,
+        choosiness: choosy as f32,
+        breeding_day: (bs.atan2(bc) / std::f64::consts::TAU).rem_euclid(1.0) as f32,
+    })
 }
 
 struct Dsu(Vec<usize>);
@@ -191,6 +242,12 @@ pub struct Split {
     /// Population keys that form the new species.
     pub members: Vec<usize>,
     pub cause: String,
+    /// Indices into the summaries passed to `detect_splits`: the new species' populations
+    /// and those of the largest remaining cluster.
+    pub member_pops: Vec<usize>,
+    pub main_pops: Vec<usize>,
+    /// False when the new species shares no land border with that cluster.
+    pub adjacent: bool,
 }
 
 /// Groups populations into reproductively compatible clusters and decides which
@@ -270,6 +327,7 @@ pub fn detect_splits(
         info.pending_split = 0;
         sig.sort_by(|a, b| b.0.cmp(&a.0).then(a.1[0].cmp(&b.1[0])));
         let main: Vec<u32> = sig[0].1.iter().map(|&i| pops[i].patch).collect();
+        let main_pops = sig[0].1.clone();
         for (_, members) in sig.into_iter().skip(1) {
             let adjacent = members
                 .iter()
@@ -283,6 +341,9 @@ pub fn detect_splits(
                 parent: sp,
                 members: members.iter().map(|&i| pops[i].key).collect(),
                 cause: cause.to_string(),
+                main_pops: main_pops.clone(),
+                member_pops: members,
+                adjacent,
             });
         }
     }

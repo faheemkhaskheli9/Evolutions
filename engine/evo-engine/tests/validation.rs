@@ -4,6 +4,7 @@
 //! Fast tests run on every `cargo test`; long ecological tests are `#[ignore]`d and
 //! run with `cargo test --release -- --ignored`.
 
+use evo_engine::explain::drift_test;
 use evo_engine::genetics::{AlleleTable, FounderSpec, Genome, GenomeArch};
 use evo_engine::population::multinomial_resample;
 use evo_engine::rng::Rng;
@@ -615,6 +616,20 @@ fn v_s1_allopatric_speciation() {
             .collect::<Vec<_>>()
     );
     assert!(alive >= 2, "no speciation across the barrier");
+    // "Why?" (PRD FR-O8): allopatric, across the strait, with an isolation factor named.
+    let (index, _) = s
+        .events
+        .iter()
+        .enumerate()
+        .find(|(_, e)| e.kind == evo_engine::record::EventKind::Speciation)
+        .unwrap();
+    let why = &s.insight.why[&(index as u32)];
+    eprintln!("{}\n{:?}", why.summary, why.numbers);
+    assert_eq!(why.cause.as_deref(), Some("allopatric"));
+    assert!(why.summary.contains("open water"), "{}", why.summary);
+    assert!(why
+        .summary
+        .contains("Reproductive isolation comes mostly from"));
 }
 
 /// Founders are created with their starting age even at year 0, so Population mode
@@ -1118,4 +1133,204 @@ fn v_s1_fst_rises_across_a_strait() {
         split > 2.0 * connected + 0.02,
         "split F_ST {split:.3} vs connected {connected:.3}"
     );
+}
+
+/// "Why?" (PRD FR-O8): in Ice Age, hares' insulation rises under selection from cold
+/// stress, far beyond what drift could do at their population size.
+#[test]
+fn why_insulation_rises_from_cold_in_the_ice_age() {
+    let mut s = Simulation::new(NewWorld {
+        template: "ice_age".into(),
+        seed: 3,
+        gen: None,
+        founders: None,
+        realism: None,
+    })
+    .unwrap();
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(200.0);
+    let hare = 0;
+    let w = s.explain_trait(hare, Trait::Insulation, 0.0, s.year());
+    eprintln!("{}\n{:#?}", w.summary, w.numbers);
+    let rise = &s.metrics.series[&hare];
+    assert!(
+        rise.last().unwrap().mean[1] > rise[0].mean[1] + 0.03,
+        "insulation did not rise"
+    );
+    assert_eq!(w.verdict.as_deref(), Some("selection"));
+    assert_eq!(w.cause.as_deref(), Some("cold stress"));
+    assert!(w.summary.contains("cold stress") && w.summary.contains("drift"));
+}
+
+/// The same for the Chronicle event itself: the long Ice Age run in which hares'
+/// insulation passes 3 SD (seed 3, year 951).
+#[test]
+#[ignore = "long: about a minute in release"]
+fn why_insulation_event_names_cold_stress() {
+    let mut s = Simulation::new(NewWorld {
+        template: "ice_age".into(),
+        seed: 3,
+        gen: None,
+        founders: None,
+        realism: None,
+    })
+    .unwrap();
+    s.run_years(1.0);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(999.0);
+    let (index, _) = s
+        .events
+        .iter()
+        .enumerate()
+        .find(|(_, e)| {
+            e.species == Some(0) && e.text.contains("insulation") && e.text.contains("increased")
+        })
+        .expect("no insulation event");
+    let w = &s.insight.why[&(index as u32)];
+    eprintln!("{}", w.summary);
+    assert_eq!(w.verdict.as_deref(), Some("selection"));
+    assert_eq!(w.cause.as_deref(), Some("cold stress"));
+    assert!(w.summary.contains("than drift") || w.summary.contains("drift alone"));
+}
+
+/// A small, isolated Blank Slate population: traits nothing selects on change by
+/// drift alone, and the "Why?" says so.
+#[test]
+fn why_neutral_trait_change_is_drift_in_a_small_population() {
+    let mut s = Simulation::new(NewWorld {
+        template: "blank".into(),
+        seed: 21,
+        gen: None,
+        founders: Some(vec![FounderGroup {
+            species: "hare".into(),
+            count: 60,
+            diversity: 0.8,
+            region: Some((0.5, 0.5, 0.05)),
+            delay_years: 0.0,
+        }]),
+        realism: None,
+    })
+    .unwrap();
+    s.params.habitat_m2_per_tile = 100.0;
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(300.0);
+    let n = s.population();
+    let neutral = [
+        Trait::Boldness,
+        Trait::Sociality,
+        Trait::Preference,
+        Trait::Choosiness,
+        Trait::Dispersal,
+    ];
+    let mut verdicts = vec![];
+    for t in neutral {
+        let w = s.explain_trait(0, t, 0.0, s.year());
+        eprintln!(
+            "{:?}: {:?} {}",
+            t,
+            w.verdict,
+            w.numbers
+                .iter()
+                .map(|x| format!("{}={}", x.0, x.1))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        verdicts.push(w.verdict.unwrap_or_default());
+    }
+    eprintln!("population {n}");
+    assert!(n > 0 && n < 5000, "population {n}");
+    assert!(verdicts.iter().all(|v| v != "selection"), "{verdicts:?}");
+    assert!(
+        verdicts.iter().filter(|v| *v == "drift").count() >= 4,
+        "{verdicts:?}"
+    );
+}
+
+/// The drift test is calibrated: for traits nothing selects on, the change in the
+/// genetic mean over a century divided by the drift SD has mean square ≈ 1.
+#[test]
+fn drift_test_is_calibrated_on_neutral_traits() {
+    let mut z2 = vec![];
+    for seed in 30..38 {
+        let mut s = Simulation::new(NewWorld {
+            template: "blank".into(),
+            seed,
+            gen: None,
+            founders: Some(vec![FounderGroup {
+                species: "hare".into(),
+                count: 60,
+                diversity: 0.8,
+                region: Some((0.5, 0.5, 0.05)),
+                delay_years: 0.0,
+            }]),
+            realism: None,
+        })
+        .unwrap();
+        s.params.habitat_m2_per_tile = 100.0;
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(300.0);
+        let track = &s.insight.genetic[&0];
+        for t in [
+            Trait::Boldness,
+            Trait::Sociality,
+            Trait::Preference,
+            Trait::Choosiness,
+            Trait::Dispersal,
+        ] {
+            for from in [0.0, 100.0, 200.0] {
+                let d = drift_test(track, t as usize, from, from + 100.0).unwrap();
+                z2.push(d.z * d.z);
+            }
+        }
+    }
+    let mean = z2.iter().sum::<f64>() / z2.len() as f64;
+    let over3 = z2.iter().filter(|&&x| x >= 9.0).count();
+    eprintln!("{} tests: mean z² {mean:.2}, {over3} with z ≥ 3", z2.len());
+    assert!((0.6..1.6).contains(&mean), "mean z² {mean:.2}");
+    assert!(over3 <= 2, "{over3} neutral changes called selection");
+}
+
+/// "Why?" for a crash caused by an intervention, and the records' life in saves:
+/// they survive a save, and version 4 saves (made before them) load without them.
+#[test]
+fn why_crash_from_plague_and_saves() {
+    let mut s = blank(52);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(10.0);
+    s.apply(evo_engine::Intervention::Plague {
+        species: 0,
+        mortality: 0.9,
+    })
+    .unwrap();
+    s.run_years(1.0);
+    let (index, e) = s
+        .events
+        .iter()
+        .enumerate()
+        .find(|(_, e)| e.kind == evo_engine::record::EventKind::Crash)
+        .expect("no crash");
+    eprintln!("{}", e.text);
+    let why = s.why_json(index);
+    eprintln!("{why:#}");
+    assert_eq!(why["cause"], "intervention");
+    assert!(why["summary"].as_str().unwrap().contains("plague"));
+    assert_eq!(s.events_json(index)[0]["why"], true);
+    assert!(s.why_json(0).is_null());
+
+    let again = Simulation::load_bytes(&s.save_bytes().unwrap()).unwrap();
+    assert_eq!(again.why_json(index), why);
+    assert_eq!(again.state_hash(), s.state_hash());
+
+    // A version 4 save: the same bytes without the trailing records.
+    let mut empty = Simulation::load_bytes(&s.save_bytes().unwrap()).unwrap();
+    empty.insight = Default::default();
+    let mut v4 = empty.save_bytes().unwrap();
+    // Five empty maps (u64 lengths) and three f64s.
+    v4.truncate(v4.len() - 5 * 8 - 3 * 8);
+    v4[4..8].copy_from_slice(&4u32.to_le_bytes());
+    let mut old = Simulation::load_bytes(&v4).unwrap();
+    assert!(old.insight.why.is_empty() && old.why_json(index).is_null());
+    assert_eq!(old.state_hash(), s.state_hash());
+    old.run_years(3.0);
+    assert!(!old.insight.recent[&0].is_empty());
 }

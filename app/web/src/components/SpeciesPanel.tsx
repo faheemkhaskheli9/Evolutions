@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import type { AlleleInfo, Catalog, SpeciesDetail, SpeciesInfo } from "../engine/protocol";
+import type { AlleleInfo, Catalog, SpeciesDetail, SpeciesInfo, Why } from "../engine/protocol";
 import { fmt, formatYears, rgb } from "../util";
 import { LineChart } from "./LineChart";
 import { ALLELE_COLORS, alleleSeries, heterozygositySeries, MAX_ALLELES, neSeries } from "./popgenCharts";
 import { describeAllele } from "./WorldPanel";
+import { WhyPanel } from "./WhyPanel";
 
 interface Props {
   species: SpeciesInfo[];
@@ -17,12 +18,17 @@ interface Props {
   /** Alleles whose frequency trajectories are charted. */
   trackUids: number[];
   setTrackUids: (uids: number[]) => void;
+  /** The trait charted. */
+  trait: string;
+  setTrait: (key: string) => void;
+  /** Explanation of the charted trait's change since the species arose: undefined until asked, then null while working. */
+  traitWhy: Why | null | undefined;
+  onExplainTrait: (key: string) => void;
 }
 
 const KEY_TRAITS = ["body_mass", "insulation", "appendage", "coat", "diet", "brain", "litter", "pace", "heat_tolerance", "kidney", "ornament", "leg_length"];
 
-export function SpeciesPanel({ species, year, catalog, selected, onSelect, detail, alleles, trackUids, setTrackUids }: Props) {
-  const [trait, setTrait] = useState("body_mass");
+export function SpeciesPanel({ species, year, catalog, selected, onSelect, detail, alleles, trackUids, setTrackUids, trait, setTrait, traitWhy, onExplainTrait }: Props) {
   const [showExtinct, setShowExtinct] = useState(true);
   const sorted = useMemo(
     () =>
@@ -96,6 +102,17 @@ export function SpeciesPanel({ species, year, catalog, selected, onSelect, detai
                     },
                   ]}
                 />
+              )}
+              {traitIndex >= 0 && (
+                <div className="trait-why">
+                  {traitWhy === undefined ? (
+                    <button className="link" onClick={() => onExplainTrait(trait)}>
+                      Why did {traitMeta.label.toLowerCase()} change? Selection or drift?
+                    </button>
+                  ) : (
+                    <WhyPanel why={traitWhy ?? undefined} />
+                  )}
+                </div>
               )}
               <table className="traits">
                 <thead>

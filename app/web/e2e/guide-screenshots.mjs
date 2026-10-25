@@ -113,6 +113,18 @@ try {
   await page.locator(".events li").first().waitFor();
   await page.locator(".tab-content").evaluate((el) => (el.scrollTop = 0));
   await shot("13-chronicle", page.locator(".side"));
+  const adaptation = page.locator(".ev-adaptation", { has: page.locator(".ev-why") }).first();
+  await adaptation.locator(".ev-why").click();
+  await adaptation.locator(".why p").waitFor();
+  await adaptation.locator(".why summary").click();
+  await page.waitForTimeout(300);
+  await shot("24-why", adaptation);
+  await page.getByRole("tab", { name: "Species" }).click();
+  await page.getByLabel("Trait to chart").selectOption({ label: "Boldness" });
+  await page.getByRole("button", { name: /^Why did .* change\?/ }).click();
+  await page.locator(".trait-why .why-verdict").waitFor();
+  await page.locator(".trait-why").scrollIntoViewIfNeeded();
+  await shot("25-trait-why", page.locator(".trait-why"));
 
   console.log("5. Map layers");
   await page.getByRole("tab", { name: "World" }).click();

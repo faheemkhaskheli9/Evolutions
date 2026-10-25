@@ -233,6 +233,9 @@ pub struct Annual {
     pub need_kj: f32,
     pub mating: f32,
     pub maturity_years: f32,
+    /// Newborns' cold and heat stress in their birth month (they lower juvenile survival).
+    pub birth_cold: f32,
+    pub birth_heat: f32,
 }
 
 /// Heat balance with the same behavioural buffering as Individual mode: animals
@@ -359,6 +362,8 @@ fn annual_heat(
         ((p.get(Trait::BreedingDay) + d.gestation_days / 365.25) * 12.0) as usize % 12;
     let dn = derive_thermal(p, d.neonate_kg);
     let tb = thermal(&dn, dn.bmr_w * 1.2, pc.temp_month[birth_month]);
+    let birth_cold = 0.3 * tb.cold_stress + 0.2 * (tb.extra_w / dn.bmr_w.max(1e-3)).min(4.0);
+    let birth_heat = 0.3 * tb.heat_stress;
     let birth_stress = 0.3 * tb.cold_stress
         + 0.3 * tb.heat_stress
         + 0.2 * (tb.extra_w / dn.bmr_w.max(1e-3)).min(4.0);
@@ -379,6 +384,8 @@ fn annual_heat(
         need_kj: need + 0.5 * repro_kj,
         mating: acc / eco.mean_acc.max(1e-4),
         maturity_years: d.maturity_days / 365.25,
+        birth_cold,
+        birth_heat,
     }
 }
 
@@ -407,6 +414,7 @@ const HEAT_NEUTRAL: [Trait; 6] = [
 /// `mass`, if given, is `MassTerms` for the phenotype's adult mass, and `heat` its
 /// `year_heat`; both are known when the phenotype differs from one already evaluated
 /// only in traits they do not depend on.
+#[cfg(test)]
 fn fitness(
     p: &Phenotype,
     pc: &PatchCtx,
@@ -416,6 +424,33 @@ fn fitness(
     mass: Option<&MassTerms>,
     heat: Option<&YearHeat>,
 ) -> f32 {
+    fitness_parts(p, pc, eco, bg, mean_fec, mass, heat).w
+}
+
+/// `fitness` and the pieces it is made of, for splitting the selection gradient
+/// into the hazards and reproduction behind it (PRD FR-O8).
+struct FitParts {
+    w: f32,
+    /// Survival over the year.
+    s: f32,
+    /// Hazards: starvation, dehydration, predation, heat, cold, ageing.
+    hazards: [f32; 6],
+    /// Credited reproduction (before the 0.25 weight).
+    repro: f32,
+    fecundity: f32,
+    birth_cold: f32,
+    birth_heat: f32,
+}
+
+fn fitness_parts(
+    p: &Phenotype,
+    pc: &PatchCtx,
+    eco: &Eco,
+    bg: f32,
+    mean_fec: f32,
+    mass: Option<&MassTerms>,
+    heat: Option<&YearHeat>,
+) -> FitParts {
     let d = match mass {
         Some(mt) => derive_with(p, mt),
         None => derive(p, p.get(Trait::BodyMass)),
@@ -424,8 +459,35 @@ fn fitness(
         Some(yh) => annual_heat(p, &d, yh, pc, eco, bg),
         None => annual(p, &d, pc, eco, bg),
     };
-    let s = (-(a.hazard + gompertz_hazard(&d, a.maturity_years + 1.0, 0.0))).exp();
-    (s + 0.25 * (a.fecundity + mean_fec * a.mating.min(3.0))).max(1e-6)
+    let ageing = gompertz_hazard(&d, a.maturity_years + 1.0, 0.0);
+    let s = (-(a.hazard + ageing)).exp();
+    let repro = a.fecundity + mean_fec * a.mating.min(3.0);
+    FitParts {
+        w: (s + 0.25 * repro).max(1e-6),
+        s,
+        hazards: [
+            a.starvation,
+            a.dehydration,
+            a.predation,
+            a.heat,
+            a.cold,
+            ageing,
+        ],
+        repro,
+        fecundity: a.fecundity,
+        birth_cold: a.birth_cold,
+        birth_heat: a.birth_heat,
+    }
+}
+
+/// Selection on one deme in the last Population-mode step (PRD FR-O8): the gradient
+/// per latent trait and its split into drivers (`crate::explain::DRIVERS`).
+#[derive(Clone, Debug)]
+pub struct DemeSelection {
+    pub species: u32,
+    pub n: u32,
+    pub beta: [f32; N_TRAITS],
+    pub drivers: [[f32; crate::explain::N_DRIVERS]; N_TRAITS],
 }
 
 impl Simulation {
@@ -755,6 +817,7 @@ impl Simulation {
         let (dmi_p, dmi_s) = (self.params.dmi_probability, self.params.dmi_cost);
         let mut demes = std::mem::take(&mut self.demes);
         let mut diag = Vec::with_capacity(demes.len());
+        let mut selection = Vec::with_capacity(demes.len());
         for (k, deme) in demes.iter_mut().enumerate() {
             let mut rng = Rng::keyed(
                 seed,
@@ -777,6 +840,7 @@ impl Simulation {
             let latent = latents[k];
             let delta = 0.05f32;
             let mut beta = [0f32; N_TRAITS];
+            let mut drivers = [[0f32; crate::explain::N_DRIVERS]; N_TRAITS];
             for (t, b) in beta.iter_mut().enumerate() {
                 let trait_t = Trait::from_index(t);
                 if FITNESS_NEUTRAL.contains(&trait_t) {
@@ -791,12 +855,43 @@ impl Simulation {
                 let heat = HEAT_NEUTRAL.contains(&trait_t).then_some(&base_heat);
                 let mass = (trait_t != Trait::BodyMass).then_some(&base_mass);
                 let fec = base.fecundity;
-                let wh = fitness(&hi, pc, &e, bg, fec, mass, heat);
-                let wl = fitness(&lo, pc, &e, bg, fec, mass, heat);
+                let fh = fitness_parts(&hi, pc, &e, bg, fec, mass, heat);
+                let fl = fitness_parts(&lo, pc, &e, bg, fec, mass, heat);
+                let (wh, wl) = (fh.w, fl.w);
                 // Gradients per latent unit, capped at strengths seen in nature
                 // (|β| ≲ 0.5 per phenotypic SD; Kingsolver et al. 2001).
                 *b = ((wh.ln() - wl.ln()) / (2.0 * delta)).clamp(-1.0, 1.0);
+                // d ln w = (ds + 0.25·dR) / w, with ds = −s·dH: each hazard's and
+                // reproduction's share of the gradient. Young survive at
+                // exp(−(H/2 + birth stress)), so the hazards and newborns' heat and cold
+                // stress also act through reproduction; what is left is reproduction.
+                let (s_mid, w_mid) = (0.5 * (fh.s + fl.s), 0.5 * (wh + wl));
+                let fec_mid = 0.5 * (fh.fecundity + fl.fecundity);
+                let scale = 1.0 / (2.0 * delta) / w_mid;
+                let dr = &mut drivers[t];
+                let mut via_young = 0.0;
+                for h in 0..6 {
+                    let dh = fh.hazards[h] - fl.hazards[h];
+                    let young = if h < 5 {
+                        -0.25 * fec_mid * 0.5 * dh
+                    } else {
+                        0.0
+                    };
+                    via_young += young;
+                    dr[h] = (-s_mid * dh + young) * scale;
+                }
+                let cold = -0.25 * fec_mid * (fh.birth_cold - fl.birth_cold);
+                let heat = -0.25 * fec_mid * (fh.birth_heat - fl.birth_heat);
+                dr[4] += cold * scale;
+                dr[3] += heat * scale;
+                dr[6] = (0.25 * (fh.repro - fl.repro) - via_young - cold - heat) * scale;
             }
+            selection.push(DemeSelection {
+                species: deme.species,
+                n: deme.total(),
+                beta,
+                drivers,
+            });
             for &li in &arch.trait_loci {
                 let pool = &mut deme.freqs[li];
                 let mut mean_e = [0f32; 2];
@@ -1100,6 +1195,7 @@ impl Simulation {
         demes.sort_by_key(|d| (d.species, d.patch));
         self.demes = demes;
         self.diagnostics = diag;
+        self.selection = selection;
         self.world.grow_vegetation_year();
         self.minutes += self.minutes_per_year() as u64;
     }

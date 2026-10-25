@@ -552,6 +552,15 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
       case "alleles":
         if (engine) post({ type: "alleles", species: m.species, list: JSON.parse(engine.alleles(m.species)) });
         break;
+      case "why":
+        if (engine) post({ type: "why", index: m.index, data: JSON.parse(engine.why(m.index)) });
+        break;
+      case "explainTrait":
+        if (engine) {
+          const now = JSON.parse(engine.status()).year as number;
+          post({ type: "traitWhy", species: m.species, key: m.key, data: JSON.parse(engine.explain_trait(m.species, m.key, m.from, now)) });
+        }
+        break;
       case "density":
         densityOn = m.on;
         densitySpecies = m.species;

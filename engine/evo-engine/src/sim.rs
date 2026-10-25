@@ -27,7 +27,9 @@ pub const SAVE_MAGIC: &[u8; 4] = b"EVO1";
 /// fixed-seed outcomes in both modes.
 /// Version 4 (same outcomes) saves the population-genetics series (`popgen`) after the
 /// replay log; older saves load with an empty series.
-pub const MODEL_VERSION: u32 = 4;
+/// Version 5 (same outcomes) saves the "Why?" records (`insight`) after that series;
+/// older saves load without them.
+pub const MODEL_VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -126,6 +128,13 @@ pub struct Simulation {
     /// part of `state_hash()`: they are read from the state and never change it.
     #[serde(skip)]
     pub popgen: crate::popgen::PopGen,
+    /// Last Population-mode step's selection per deme, for `insight`.
+    #[serde(skip)]
+    pub(crate) selection: Vec<crate::population::DemeSelection>,
+    /// Vitals, genetic series and event explanations (PRD FR-O8). Saved after
+    /// `popgen` and, like it, not part of `state_hash()`.
+    #[serde(skip)]
+    pub insight: crate::explain::Insight,
 }
 
 impl Simulation {
@@ -207,6 +216,8 @@ impl Simulation {
                 entries: vec![],
             },
             popgen: Default::default(),
+            selection: vec![],
+            insight: crate::explain::Insight::new(),
         };
         sim.event(
             EventKind::Info,
@@ -610,6 +621,7 @@ impl Simulation {
             a.alive = false;
             a.cause = Some(cause);
             self.deaths[cause as usize] += 1;
+            self.note_death(i, cause);
         }
     }
 
@@ -988,6 +1000,7 @@ impl Simulation {
                 }
             }
             let name = self.species.get(id).name.clone();
+            let index = self.events.len() as u32;
             self.event(
                 EventKind::Speciation,
                 Some(id),
@@ -999,6 +1012,10 @@ impl Simulation {
                     s.cause
                 ),
             );
+            let daughter: Vec<_> = s.member_pops.iter().map(|&i| &pops[i]).collect();
+            let main: Vec<_> = s.main_pops.iter().map(|&i| &pops[i]).collect();
+            let why = self.explain_speciation(id, s.parent, !s.adjacent, &daughter, &main);
+            self.insight.why.insert(index, why);
         }
     }
 
@@ -1082,6 +1099,8 @@ impl Simulation {
             .filter(|s| s.extinct_year.is_none())
             .map(|s| s.id)
             .collect();
+        // Events to explain once this sample is recorded: (event index, trait for shifts).
+        let mut pending = vec![];
         for id in ids {
             let st = stats.remove(&id).unwrap_or_default();
             let sample = st.sample(year);
@@ -1090,6 +1109,7 @@ impl Simulation {
                 let info = self.species.get_mut(id);
                 info.extinct_year = Some(year);
                 let (cn, nm) = (info.common_name.clone(), info.name.clone());
+                pending.push((self.events.len(), None));
                 self.event(
                     EventKind::Extinction,
                     Some(id),
@@ -1098,11 +1118,12 @@ impl Simulation {
                 self.metrics.push(id, sample);
                 continue;
             }
-            self.check_trait_shifts(id, &sample.mean, &sample.sd, year);
+            pending.extend(self.check_trait_shifts(id, &sample.mean, &sample.sd, year));
             let info = self.species.get_mut(id);
             if info.peak_n >= 100 && (n as f32) < 0.35 * info.peak_n as f32 {
                 let (cn, peak) = (info.common_name.clone(), info.peak_n);
                 info.peak_n = n;
+                pending.push((self.events.len(), None));
                 self.event(
                     EventKind::Crash,
                     Some(id),
@@ -1115,9 +1136,17 @@ impl Simulation {
             self.metrics.push(id, sample);
         }
         self.record_popgen(year);
+        self.record_insight(year, &pending);
     }
 
-    fn check_trait_shifts(&mut self, id: u32, mean: &[f32], sd: &[f32], year: f64) {
+    /// Announces large trait shifts; returns each announcement's event index and trait.
+    fn check_trait_shifts(
+        &mut self,
+        id: u32,
+        mean: &[f32],
+        sd: &[f32],
+        year: f64,
+    ) -> Vec<(usize, Option<Trait>)> {
         const WATCH: [Trait; 12] = [
             Trait::BodyMass,
             Trait::Insulation,
@@ -1142,7 +1171,7 @@ impl Simulation {
             }
             info.origin_mean = Some(m);
             info.origin_sd = Some(s);
-            return;
+            return vec![];
         };
         let mut msgs = vec![];
         for t in WATCH {
@@ -1152,20 +1181,26 @@ impl Simulation {
             if level > info.announced_shift[i] {
                 info.announced_shift[i] = level;
                 let pct = 100.0 * (mean[i] - om[i]) / om[i].abs().max(1e-6);
-                msgs.push(format!(
-                    "{}: {} {} by {:.0}% ({:.1} SD) since the species arose {:.0} years ago.",
-                    info.common_name,
-                    t.info().label.to_lowercase(),
-                    if z > 0.0 { "increased" } else { "decreased" },
-                    pct.abs(),
-                    z.abs(),
-                    year - info.origin_year
+                msgs.push((
+                    t,
+                    format!(
+                        "{}: {} {} by {:.0}% ({:.1} SD) since the species arose {:.0} years ago.",
+                        info.common_name,
+                        t.info().label.to_lowercase(),
+                        if z > 0.0 { "increased" } else { "decreased" },
+                        pct.abs(),
+                        z.abs(),
+                        year - info.origin_year
+                    ),
                 ));
             }
         }
-        for m in msgs {
+        let mut out = vec![];
+        for (t, m) in msgs {
+            out.push((self.events.len(), Some(t)));
             self.event(EventKind::Adaptation, Some(id), m);
         }
+        out
     }
 
     // ---- Interventions ----------------------------------------------------------------
@@ -1365,7 +1400,7 @@ impl Simulation {
     // ---- Persistence ----------------------------------------------------------------------
 
     /// Save file: magic, the state (bincode), the replay log (JSON in a bincode string),
-    /// then the population-genetics series (bincode).
+    /// then the population-genetics series and the "Why?" records (bincode).
     pub fn save_bytes(&self) -> Result<Vec<u8>, String> {
         let mut out = SAVE_MAGIC.to_vec();
         let mut sim = bincode::serialize(self).map_err(|e| e.to_string())?;
@@ -1375,6 +1410,7 @@ impl Simulation {
         let log = serde_json::to_string(&self.replay).map_err(|e| e.to_string())?;
         out.extend(bincode::serialize(&log).map_err(|e| e.to_string())?);
         out.extend(bincode::serialize(&self.popgen).map_err(|e| e.to_string())?);
+        out.extend(bincode::serialize(&self.insight).map_err(|e| e.to_string())?);
         Ok(out)
     }
 
@@ -1396,6 +1432,10 @@ impl Simulation {
             sim.replay = serde_json::from_str(&log).map_err(|e| corrupt(e.to_string()))?;
             if version >= 4 {
                 sim.popgen = crate::popgen::PopGen::deserialize(&mut de)
+                    .map_err(|e| corrupt(e.to_string()))?;
+            }
+            if version >= 5 {
+                sim.insight = crate::explain::Insight::deserialize(&mut de)
                     .map_err(|e| corrupt(e.to_string()))?;
             }
             sim.validate().map_err(corrupt)?;

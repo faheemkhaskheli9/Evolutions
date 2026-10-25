@@ -195,6 +195,9 @@ The **Species** tab lists every species. Living species come first, sorted by ab
 - **Trait chart:** pick any trait from the drop-down. The chart shows the species' mean (line) and spread (± one standard deviation, the shaded band) over time.
 - **Trait table:** the main traits at the species' origin and now, with the percentage change. Increases are green and decreases red. Click a row to chart that trait.
 - **Neutral genetic diversity:** heterozygosity at neutral marker genes. It falls in small or bottlenecked populations.
+- **Why did this trait change? Selection or drift?** Under the trait chart, this link explains the charted trait's change since the species arose, in the same way as the Chronicle's [Why?](#why). It works for every trait, including ones nothing selects on, such as boldness, which simply drift:
+
+![Why? for steppe hares' boldness: consistent with drift, and no hazard depends on boldness](guide/25-trait-why.png)
 
 Below these, **Population genetics** has the textbook measures, from neutral marker genes, recorded at each metrics sample:
 
@@ -240,6 +243,21 @@ It records:
 Use the filter chips (**All**, **New species**, **Extinctions**, **Adaptations**, **World**) to focus on one kind of event.
 
 The **⟲** button at the end of an entry goes back to just before that event (see [Rewind](#rewind)).
+
+### Why?
+
+Adaptations, population crashes, extinctions and new species have a **Why?** link. It opens a panel that says, in plain language, what caused the event, with the evidence underneath:
+
+![Why? for a pack wolf trait change: "Consistent with drift", the plain-language answer, the points behind it, and the numbers: genetic change, expected drift, effective size, and the selection gradient split by hazard](guide/24-why.png)
+
+- **Trait changes** get a verdict: **Selection**, **Consistent with drift**, or **Selection and drift**. Random genetic drift moves a trait's average by about √(V_A·t/Nₑ) over t generations (V_A is the trait's additive genetic variance, Nₑ the effective population size). The panel compares the actual change with that: more than 3 times as large is selection, less than 2 times is consistent with drift, and in between is mixed. Large populations drift very little, so a steady change in a big population is almost always selection; in a small one, even a large change can be chance.
+- It then names the **hazard the trait affects most** and which way it pushes: for example *"The main pressure is cold stress: animals with higher insulation suffer less cold stress"*, and what holds the change back (*"animals with higher insulation need more food"*). These come from splitting the trait's selection gradient (β) into starvation, dehydration, predation, heat stress, cold stress, ageing and reproduction. Cold and heat include the stress newborns face in their birth month.
+- **Crashes and extinctions** name the hazard that grew most between the population's peak and the crash (or, if none rose, the one that stayed high), and the matching cause: a food shortage (often a population that outgrew its food), a new predator or more predators, a climate shift, or one of your interventions (a plague or a meteor).
+- **New species** say whether the split was allopatric (and what separated the ranges: open water, mountains or a gap in the range) or parapatric, and which of the three isolation factors contributed most: hybrid incompatibilities, mate choice, or breeding at different times of year.
+
+**The numbers** opens the values behind the answer, and the link at the bottom opens the chart that shows it (the trait's chart, the population chart, or the tree).
+
+In Population mode the gradient comes from the same fitness model that moves allele frequencies, and allele frequencies are resampled every year, so each year counts as one generation of drift. In Individual mode the hazards are measured from what the animals actually died of. Worlds saved before this feature have no explanations for their earlier events; new events are explained from the moment the world is opened.
 
 ---
 
@@ -344,7 +362,7 @@ When the replay ends, a message says whether the world is identical to the origi
 
 ### Export data
 
-**Export data** (**World** tab) downloads the run's data for a spreadsheet, R or Python. The files are byte-for-byte the same as the command-line runner writes for the same save (`evo run --load run.evo --years 0 --csv out/ --chronicle chronicle.csv --newick tree.nwk --settings settings.json`).
+**Export data** (**World** tab) downloads the run's data for a spreadsheet, R or Python. The files are byte-for-byte the same as the command-line runner writes for the same save (`evo run --load run.evo --years 0 --csv out/ --chronicle chronicle.csv --newick tree.nwk --settings settings.json`). The runner's `--why why.json` also writes each event's "Why?" explanation as JSON.
 
 - **Time series (CSV):** one file per species, named `species_<id>_<name>.csv`, or just the species chosen in the list. One row per metrics sample (sampled regularly, thinned evenly as a run grows long):
 

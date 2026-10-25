@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { SimEvent, SpeciesInfo } from "../engine/protocol";
+import type { SimEvent, SpeciesInfo, Why } from "../engine/protocol";
 import { rgb } from "../util";
+import { WhyPanel } from "./WhyPanel";
 
 const FILTERS: { key: string; label: string; kinds: SimEvent["kind"][] }[] = [
   { key: "all", label: "All", kinds: [] },
@@ -15,14 +16,23 @@ export function EventsPanel({
   species,
   onSelectSpecies,
   onRewindBefore,
+  whys,
+  onWhy,
+  onShowChart,
 }: {
   events: SimEvent[];
   species: SpeciesInfo[];
   onSelectSpecies: (id: number) => void;
   /** Rewinds to just before an event (PRD FR-T6); absent while that is not possible. */
   onRewindBefore?: (index: number) => void;
+  /** Explanations received so far, by event index (PRD FR-O8). */
+  whys: Record<number, Why | null>;
+  /** Asks for the explanation of an event. */
+  onWhy: (index: number) => void;
+  onShowChart: (why: Why) => void;
 }) {
   const [filter, setFilter] = useState("all");
+  const [open, setOpen] = useState<number | null>(null);
   const f = FILTERS.find((x) => x.key === filter)!;
   const shown = events.filter((e) => f.kinds.length === 0 || f.kinds.includes(e.kind)).slice(-400).reverse();
   return (
@@ -51,11 +61,26 @@ export function EventsPanel({
                 )}
                 {e.text}
               </span>
+              {e.why && e.index !== undefined && (
+                <button
+                  className={`link ev-why ${open === index ? "open" : ""}`}
+                  onClick={() => {
+                    if (open === index) return setOpen(null);
+                    setOpen(index);
+                    if (!(index in whys)) onWhy(index);
+                  }}
+                  aria-expanded={open === index}
+                  title="Why did this happen?"
+                >
+                  Why?
+                </button>
+              )}
               {onRewindBefore && e.index !== undefined && (
                 <button className="link ev-rewind" onClick={() => onRewindBefore(index)} title="Rewind to the latest checkpoint before this event" aria-label={`Go to just before: ${e.text}`}>
                   ⟲
                 </button>
               )}
+              {open === index && e.why && <WhyPanel why={whys[index]} onShowChart={onShowChart} />}
             </li>
           );
         })}

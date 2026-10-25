@@ -27,6 +27,7 @@ fn usage() -> ! {
       --csv <dir>              write per-species metrics CSV files (trait means and SDs)
       --chronicle <file>       write the Chronicle events as CSV
       --newick <file>          write the phylogeny
+      --why <file>             write the \"Why?\" explanations of Chronicle events as JSON
       --settings <file>        write the world's creation settings as JSON
       --quiet                  no progress output
       --debug                  print each species' yearly vital rates (Population mode)
@@ -63,6 +64,7 @@ const RUN_OPTIONS: &[&str] = &[
     "csv",
     "chronicle",
     "newick",
+    "why",
     "settings",
     "quiet",
     "debug",
@@ -262,6 +264,9 @@ fn main() {
             if let Some(path) = o.get("settings") {
                 let json = serde_json::to_string_pretty(&sim.settings_json()).unwrap();
                 std::fs::write(path, json).expect("write settings");
+            }
+            if let Some(path) = o.get("why") {
+                std::fs::write(path, sim.explanations_json().to_string()).expect("write why");
             }
             if let Some(path) = o.get("newick") {
                 std::fs::write(path, sim.newick()).expect("write newick");
