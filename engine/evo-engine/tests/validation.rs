@@ -154,6 +154,52 @@ fn v_g3_heterozygosity_decay() {
     );
 }
 
+/// V-G3b The heterozygosity-based Nₑ estimator recovers the population size from the
+/// drift in V-G3 (no mutation, so H decays at 1/2N per generation).
+#[test]
+fn v_g3_ne_from_heterozygosity_decay() {
+    let n = 50usize;
+    let t = 30;
+    let reps = 120;
+    let (a, _) = arch(8, 1.0);
+    let het = |pop: &[Genome]| -> f64 {
+        a.neutral_loci
+            .iter()
+            .map(|&l| {
+                let mut c = std::collections::BTreeMap::new();
+                for g in pop {
+                    *c.entry(g.hap[0][l]).or_insert(0.0) += 1.0;
+                    *c.entry(g.hap[1][l]).or_insert(0.0) += 1.0;
+                }
+                let tot = 2.0 * pop.len() as f64;
+                1.0 - c.values().map(|x: &f64| (x / tot).powi(2)).sum::<f64>()
+            })
+            .sum::<f64>()
+            / a.neutral_loci.len() as f64
+    };
+    let (mut h0, mut ht) = (0.0, 0.0);
+    for r in 0..reps {
+        let mut rng = Rng::new(5000 + r);
+        let mut pop: Vec<Genome> = (0..n).map(|_| a.founder_genome(&mut rng)).collect();
+        h0 += het(&pop);
+        for _ in 0..t {
+            pop = next_generation(&a, &pop, n, &mut rng);
+        }
+        ht += het(&pop);
+    }
+    let ne = evo_engine::popgen::ne_from_inbreeding(
+        1.0 - h0 / reps as f64,
+        1.0 - ht / reps as f64,
+        t as f64,
+        0.0,
+    )
+    .expect("heterozygosity fell");
+    assert!(
+        (ne - n as f64).abs() < 0.2 * n as f64,
+        "Ne from heterozygosity {ne:.1}, census {n}"
+    );
+}
+
 /// V-G4 Fixation probability of a beneficial allele ≈ (1 − e^{−2s}) / (1 − e^{−4Ns}) (Kimura 1962).
 #[test]
 fn v_g4_beneficial_fixation_kimura() {
@@ -966,6 +1012,34 @@ fn version_1_saves_load_and_continue() {
     }
 }
 
+/// Population-genetics series survive a save; version 3 saves (made before them) load
+/// with none, and the series then starts from the load point.
+#[test]
+fn popgen_series_saved_and_old_saves_start_fresh() {
+    let mut s = blank(44);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(5.0);
+    let n = s.popgen.series[&0].len();
+    assert!(n >= 5);
+    let again = Simulation::load_bytes(&s.save_bytes().unwrap()).unwrap();
+    assert_eq!(again.popgen.series[&0].len(), n);
+    assert_eq!(again.state_hash(), s.state_hash());
+
+    // A version 3 save: the same bytes without the trailing series.
+    let mut empty = Simulation::load_bytes(&s.save_bytes().unwrap()).unwrap();
+    empty.popgen = Default::default();
+    let mut v3 = empty.save_bytes().unwrap();
+    v3.truncate(v3.len() - 8); // an empty map: its u64 length
+    v3[4..8].copy_from_slice(&3u32.to_le_bytes());
+    let mut old = Simulation::load_bytes(&v3).unwrap();
+    assert!(old.popgen.series.is_empty());
+    assert_eq!(old.state_hash(), s.state_hash());
+    let loaded_at = old.year();
+    old.run_years(2.0);
+    let series = &old.popgen.series[&0];
+    assert!(!series.is_empty() && series[0].year > loaded_at);
+}
+
 /// A real save from the first engine version (before allele uids and
 /// `dmi_rate_factor`): `evo run --template blank --seed 3 --years 2` at a56431d.
 #[test]
@@ -980,4 +1054,68 @@ fn earliest_save_format_loads_and_continues() {
     s.run_years(2.0);
     assert!(s.population() > 0);
     assert!(Simulation::load_bytes(&s.save_bytes().unwrap()).is_ok());
+}
+
+/// Mouse founders on both halves of a Blank Slate world, from one lineage (see V-S1),
+/// in Population mode with small demes; `strait` cuts the world in two.
+fn fst_world(strait: bool) -> Simulation {
+    let mut s = Simulation::new(NewWorld {
+        template: "blank".into(),
+        seed: 78,
+        gen: None,
+        founders: Some(vec![FounderGroup {
+            species: "mouse".into(),
+            count: 400,
+            diversity: 0.8,
+            region: Some((0.15, 0.5, 0.1)),
+            delay_years: 0.0,
+        }]),
+        realism: None,
+    })
+    .unwrap();
+    if strait {
+        let w = s.world.w;
+        for y in 0..s.world.h {
+            for x in (w / 2 - 2..w / 2 + 2).chain(0..2).chain(w - 2..w) {
+                let i = y * w + x;
+                s.world.water[i] = evo_engine::world::Water::Ocean;
+                s.world.elevation[i] = -100.0;
+            }
+        }
+        s.world.refresh_biomes();
+    }
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(30.0);
+    let pw = s.patches_w() as u32;
+    let east: Vec<_> = s
+        .demes
+        .iter()
+        .filter(|d| d.patch % pw < pw / 2 - 1)
+        .map(|d| {
+            let mut c = d.clone();
+            c.patch = d.patch + pw / 2 + 1;
+            c
+        })
+        .collect();
+    s.demes.extend(east);
+    s.demes.sort_by_key(|d| (d.species, d.patch));
+    // Small demes, so drift between the halves shows within a few hundred years.
+    s.params.habitat_m2_per_tile = 12.0;
+    s.run_years(400.0);
+    s
+}
+
+/// V-S1b F_ST between patches rises across a strait and stays near 0 in a connected
+/// population (PRD FR-O7).
+#[test]
+fn v_s1_fst_rises_across_a_strait() {
+    let fst = |s: &Simulation| s.popgen.series[&0].last().unwrap().fst;
+    let split = fst(&fst_world(true));
+    let connected = fst(&fst_world(false));
+    eprintln!("F_ST split {split:.3}, connected {connected:.3}");
+    assert!(connected < 0.05, "connected F_ST {connected:.3}");
+    assert!(
+        split > 2.0 * connected + 0.02,
+        "split F_ST {split:.3} vs connected {connected:.3}"
+    );
 }

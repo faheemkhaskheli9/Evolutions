@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import type { Catalog, Sample, SpeciesInfo, TraitRow } from "../engine/protocol";
+import type { AlleleInfo, Catalog, SpeciesDetail, SpeciesInfo } from "../engine/protocol";
 import { fmt, formatYears, rgb } from "../util";
 import { LineChart } from "./LineChart";
+import { ALLELE_COLORS, alleleSeries, heterozygositySeries, MAX_ALLELES, neSeries } from "./popgenCharts";
+import { describeAllele } from "./WorldPanel";
 
 interface Props {
   species: SpeciesInfo[];
@@ -9,12 +11,17 @@ interface Props {
   catalog: Catalog;
   selected: number | null;
   onSelect: (id: number) => void;
-  detail: { id: number; traits: TraitRow[]; metrics: Sample[] } | null;
+  detail: SpeciesDetail | null;
+  /** Polymorphic alleles of the selected species (null while loading). */
+  alleles: AlleleInfo[] | null;
+  /** Alleles whose frequency trajectories are charted. */
+  trackUids: number[];
+  setTrackUids: (uids: number[]) => void;
 }
 
 const KEY_TRAITS = ["body_mass", "insulation", "appendage", "coat", "diet", "brain", "litter", "pace", "heat_tolerance", "kidney", "ornament", "leg_length"];
 
-export function SpeciesPanel({ species, year, catalog, selected, onSelect, detail }: Props) {
+export function SpeciesPanel({ species, year, catalog, selected, onSelect, detail, alleles, trackUids, setTrackUids }: Props) {
   const [trait, setTrait] = useState("body_mass");
   const [showExtinct, setShowExtinct] = useState(true);
   const sorted = useMemo(
@@ -120,11 +127,68 @@ export function SpeciesPanel({ species, year, catalog, selected, onSelect, detai
                   Neutral genetic diversity (heterozygosity): {fmt(detail.metrics[detail.metrics.length - 1].het, 3)}
                 </p>
               )}
+              <PopGenCharts detail={detail} color={rgb(sel.color)} alleles={alleles} trackUids={trackUids} setTrackUids={setTrackUids} />
             </>
           ) : (
             <p className="muted">Collecting data…</p>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Population-genetics charts (PRD FR-O7): heterozygosity, F_ST, effective size, allelic richness, allele trajectories. */
+function PopGenCharts({ detail, color, alleles, trackUids, setTrackUids }: { detail: SpeciesDetail; color: string } & Pick<Props, "alleles" | "trackUids" | "setTrackUids">) {
+  const g = detail.popgen;
+  const names = useMemo(() => {
+    const byUid = new Map((alleles ?? []).map((a) => [a.uid, a]));
+    return detail.uids.map((u) => {
+      const a = byUid.get(u);
+      return a ? describeAllele(a).replace(/ · \d+%$/, "") : `allele ${u} (now lost, fixed or rare)`;
+    });
+  }, [alleles, detail.uids]);
+  if (g.length === 0) return <p className="muted small">Population-genetics charts start from the next sample (this world was saved before they were recorded).</p>;
+  const last = g[g.length - 1];
+  const addable = (alleles ?? []).filter((a) => !trackUids.includes(a.uid));
+  return (
+    <div className="popgen">
+      <h4>Population genetics</h4>
+      <LineChart yLabel="Expected heterozygosity (neutral loci)" series={heterozygositySeries(g, color)} />
+      <LineChart yLabel={`F_ST between patches — now ${fmt(last.fst, 3)}`} series={[{ name: "F_ST", color, points: g.map((s) => [s.year, s.fst]) }]} />
+      <LineChart yLabel="Population size: census and effective (Nₑ)" series={neSeries(g, detail.metrics, color)} log />
+      <LineChart yLabel="Segregating alleles (all loci)" series={[{ name: "Alleles", color, points: g.map((s) => [s.year, s.segregating]) }]} />
+      <div className="row gap small">
+        <select
+          value=""
+          disabled={trackUids.length >= MAX_ALLELES || addable.length === 0}
+          onChange={(e) => e.target.value && setTrackUids([...trackUids, Number(e.target.value)])}
+          aria-label="Add an allele to the trajectory chart"
+        >
+          <option value="">{alleles === null ? "Reading the gene pool…" : trackUids.length >= MAX_ALLELES ? `Up to ${MAX_ALLELES} alleles` : "Add allele…"}</option>
+          {addable.map((a) => (
+            <option key={a.uid} value={a.uid}>
+              {describeAllele(a)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {detail.uids.length > 0 && (
+        <>
+          <LineChart yLabel="Allele frequency" series={alleleSeries(g, detail.uids, names)} legend={false} />
+          <ul className="allele-chips small">
+            {detail.uids.map((u, k) => (
+              <li key={u}>
+                <span>
+                  <i className="swatch" style={{ background: ALLELE_COLORS[k % ALLELE_COLORS.length] }} /> {names[k]}
+                </span>
+                <button className="link" onClick={() => setTrackUids(trackUids.filter((x) => x !== u))} aria-label={`Stop charting ${names[k]}`}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

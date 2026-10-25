@@ -196,6 +196,16 @@ The **Species** tab lists every species. Living species come first, sorted by ab
 - **Trait table:** the main traits at the species' origin and now, with the percentage change. Increases are green and decreases red. Click a row to chart that trait.
 - **Neutral genetic diversity:** heterozygosity at neutral marker genes. It falls in small or bottlenecked populations.
 
+Below these, **Population genetics** has the textbook measures, from neutral marker genes, recorded at each metrics sample:
+
+- **Expected heterozygosity:** the chance that two gene copies drawn at random differ, for the whole species (H_T) and within each map patch (H_S). Drift lowers it by about 1/(2Nₑ) per generation; mutation raises it.
+- **F_ST between patches:** (H_T − H_S) / H_T, how much of the species' diversity lies *between* places. It stays near 0 in one well-connected population and rises when populations are cut off from each other, for example by a strait.
+- **Population size: census and effective (Nₑ):** the census count, Nₑ from the adult sex ratio (4·males·females / (males + females)), and Nₑ from how fast heterozygosity has fallen over the last 20 generations, corrected for mutation. The last appears only when heterozygosity is falling measurably, which takes a small population.
+- **Segregating alleles:** how many alleles are present at genes that have more than one. It falls in a bottleneck and recovers slowly through mutation.
+- **Allele frequency:** pick up to five alleles from **Add allele…** (the same list as the allele-frequency map layer) to plot their share of the species' gene copies over time; × removes one. The most variable allele is charted to start with. A line ends where an allele was lost, fixed or fell below 1%.
+
+Worlds saved before these charts existed open with empty charts, which then fill from the moment they were opened.
+
 ![Litter size rising 70% over 2,000 years, with the trait table showing which traits changed](guide/11-trait-history.png)
 
 In this run, hares evolved larger litters (+70%), better water-conserving kidneys (+46%), longer legs and larger bodies. Nobody programmed those outcomes: they emerged from the hares' energy budget, predation by wolves, and the climate.
@@ -347,6 +357,8 @@ When the replay ends, a message says whether the world is identical to the origi
   | `body_mass_sd`, `insulation_sd`, … | Standard deviation of each trait |
 
   Extinct species keep their rows up to extinction.
+
+  Each species also gets `species_<id>_<name>_popgen.csv`, the population-genetics measures above: `year`, `ht`, `hs`, `fst`, `ne` (sex ratio), `ne_h` (from heterozygosity loss; empty when it cannot be estimated), `generation_years` (the generation time `ne_h` uses) and `segregating_alleles`.
 - **Chronicle (CSV):** columns `year`, `kind` (Info, Founders, Speciation, Extinction, Mode, Intervention, Crash, Adaptation), `species` (id, empty for world events), `species_name` and `text`. Fields with commas or quotes are quoted.
 - **Phylogeny (Newick):** the same file as **Export Newick** in the Tree tab, with branch lengths in years.
 - **Settings (JSON):** the template, seed, realism, world-generator settings and founder groups the world was created with, plus the model version and current year. `founders` is null for worlds saved before replay logs existed.

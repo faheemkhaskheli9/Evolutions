@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
-import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, Sample, SimEvent, SpeciesInfo, Status, TraitRow, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, WorldInfo } from "./engine/protocol";
 import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
@@ -53,7 +53,9 @@ export default function App() {
   const [checkpoints, setCheckpoints] = useState<{ list: CheckpointInfo[]; bytes: number; budget: number }>({ list: [], bytes: 0, budget: 0 });
   const [tab, setTab] = useState<Tab>("species");
   const [selectedSpecies, setSelectedSpecies] = useState<number | null>(null);
-  const [detail, setDetail] = useState<{ id: number; traits: TraitRow[]; metrics: Sample[] } | null>(null);
+  const [detail, setDetail] = useState<SpeciesDetail | null>(null);
+  /** Alleles whose trajectories the Species panel charts, per species. */
+  const [trackUids, setTrackUids] = useState<Record<number, number[]>>({});
   const [inspectId, setInspectId] = useState<number | null>(null);
   const [inspectData, setInspectData] = useState<Record<string, unknown> | null>(null);
   const [layer, setLayer] = useState<Layer>("terrain");
@@ -61,7 +63,8 @@ export default function App() {
   const [densitySpecies, setDensitySpecies] = useState<number | null>(null);
   const [alleleSpecies, setAlleleSpecies] = useState<number | null>(null);
   const [alleleUid, setAlleleUid] = useState<number | null>(null);
-  const [alleles, setAlleles] = useState<{ species: number; list: AlleleInfo[] } | null>(null);
+  /** Polymorphic alleles per species, for the map layer and the Species panel. */
+  const [alleles, setAlleles] = useState<Record<number, AlleleInfo[]>>({});
   /** The layer last requested, so a late reply for another layer is not drawn. */
   const layerKind = useRef<string | null>(null);
   const [tool, setTool] = useState<Tool>("inspect");
@@ -99,13 +102,15 @@ export default function App() {
           setInspectId(null);
           setInspectData(null);
           setDetail(null);
+          setTrackUids({});
+          setAlleles({});
           setShowNew(false);
           setBusy(false);
           setLayerData(null);
           setDensitySpecies(null);
           setAlleleSpecies(null);
           setAlleleUid(null);
-          setAlleles(null);
+          setAlleles({});
           break;
         case "frame": {
           const f = frame.current;
@@ -169,13 +174,13 @@ export default function App() {
           }
           break;
         case "speciesDetail":
-          setDetail({ id: m.id, traits: m.traits, metrics: m.metrics });
+          setDetail({ id: m.id, traits: m.traits, metrics: m.metrics, popgen: m.popgen, uids: m.uids });
           break;
         case "layer":
           if (m.kind === layerKind.current) setLayerData(m.data);
           break;
         case "alleles":
-          setAlleles({ species: m.species, list: m.list });
+          setAlleles((a) => ({ ...a, [m.species]: m.list }));
           break;
         case "saved":
           downloadBlob(m.bytes, `evolutions-${Date.now()}.evo`);
@@ -229,12 +234,27 @@ export default function App() {
     const t = setInterval(() => client.send({ type: "inspect", id: inspectId }), 500);
     return () => clearInterval(t);
   }, [inspectId, client]);
+  const selectedUids = selectedSpecies !== null ? trackUids[selectedSpecies] : undefined;
   useEffect(() => {
     if (selectedSpecies === null) return;
-    client.send({ type: "speciesDetail", id: selectedSpecies });
-    const t = setInterval(() => client.send({ type: "speciesDetail", id: selectedSpecies }), 1500);
+    const ask = () => client.send({ type: "speciesDetail", id: selectedSpecies, uids: selectedUids ?? [] });
+    ask();
+    const t = setInterval(ask, 1500);
     return () => clearInterval(t);
-  }, [selectedSpecies, client]);
+  }, [selectedSpecies, selectedUids, client]);
+  // The Species panel's allele picker lists the selected species' polymorphic alleles.
+  useEffect(() => {
+    if (!world || tab !== "species" || selectedSpecies === null) return;
+    client.send({ type: "alleles", species: selectedSpecies });
+    const t = setInterval(() => client.send({ type: "alleles", species: selectedSpecies }), 3000);
+    return () => clearInterval(t);
+  }, [tab, selectedSpecies, world, client]);
+  // Start each species' trajectory chart with its most variable allele.
+  useEffect(() => {
+    if (selectedSpecies === null || trackUids[selectedSpecies] !== undefined) return;
+    const list = alleles[selectedSpecies];
+    if (list?.length) setTrackUids((t) => ({ ...t, [selectedSpecies]: [list[0].uid] }));
+  }, [alleles, selectedSpecies, trackUids]);
   useEffect(() => {
     setLayerData(null);
     const kind =
@@ -273,7 +293,8 @@ export default function App() {
   }, [layer, alleleSpecies, world, client]);
   useEffect(() => {
     // Start with the most variable allele; keep a chosen one even if it is lost or fixed.
-    if (alleles && alleles.species === alleleSpecies && alleleUid === null && alleles.list.length) setAlleleUid(alleles.list[0].uid);
+    const list = alleleSpecies !== null ? alleles[alleleSpecies] : undefined;
+    if (alleleUid === null && list?.length) setAlleleUid(list[0].uid);
   }, [alleles, alleleSpecies, alleleUid]);
 
   useEffect(() => {
@@ -486,7 +507,13 @@ export default function App() {
             ))}
           </nav>
           <div className="tab-content">
-            {tab === "species" && <SpeciesPanel species={species} year={status?.year ?? 0} catalog={catalog} selected={selectedSpecies} onSelect={setSelectedSpecies} detail={detail} />}
+            {tab === "species" && (
+              <SpeciesPanel species={species} year={status?.year ?? 0} catalog={catalog} selected={selectedSpecies} onSelect={setSelectedSpecies} detail={detail}
+                alleles={selectedSpecies !== null ? (alleles[selectedSpecies] ?? null) : null}
+                trackUids={selectedUids ?? []}
+                setTrackUids={(uids) => selectedSpecies !== null && setTrackUids((t) => ({ ...t, [selectedSpecies]: uids }))}
+              />
+            )}
             {tab === "tree" && (
               <PhyloTree
                 species={species}
@@ -532,9 +559,8 @@ export default function App() {
                 setAlleleSpecies={(id) => {
                   setAlleleSpecies(id);
                   setAlleleUid(null);
-                  setAlleles(null);
                 }}
-                alleles={alleles && alleles.species === alleleSpecies ? alleles.list : null}
+                alleles={alleleSpecies !== null ? (alleles[alleleSpecies] ?? null) : null}
                 alleleUid={alleleUid}
                 setAlleleUid={setAlleleUid}
                 tool={tool}

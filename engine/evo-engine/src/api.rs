@@ -121,6 +121,31 @@ impl Simulation {
         }
     }
 
+    /// Population-genetics series of a species (PRD FR-O7), with the frequency of each
+    /// allele in `uids` per sample (null where it was not tracked).
+    pub fn popgen_json(&self, species: u32, uids: &[u64]) -> Value {
+        let Some(v) = self.popgen.series.get(&species) else {
+            return json!([]);
+        };
+        Value::Array(
+            v.iter()
+                .map(|g| {
+                    json!({
+                        "year": g.year,
+                        "ht": g.ht,
+                        "hs": g.hs,
+                        "fst": g.fst,
+                        "ne": g.ne,
+                        "ne_h": (g.ne_h >= 0.0).then_some(g.ne_h),
+                        "generation": g.generation,
+                        "segregating": g.segregating,
+                        "freqs": uids.iter().map(|&u| g.freq(u)).collect::<Vec<_>>(),
+                    })
+                })
+                .collect(),
+        )
+    }
+
     pub fn events_json(&self, since: usize) -> Value {
         serde_json::to_value(&self.events[since.min(self.events.len())..]).unwrap_or(json!([]))
     }

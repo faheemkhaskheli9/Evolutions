@@ -936,3 +936,17 @@ label.check {
     padding: 8px 16px;
   }
 }
+
+.popgen h4 {
+  margin: 14px 0 4px;
+}
+.allele-chips {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+.allele-chips li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}

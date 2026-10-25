@@ -166,6 +166,13 @@ impl Engine {
         self.sim.metrics_json(species).to_string()
     }
 
+    /// Population-genetics series of a species as JSON, with the frequencies of the
+    /// alleles `uids` (see `Simulation::popgen_json`).
+    pub fn popgen(&self, species: u32, uids: &[f64]) -> String {
+        let uids: Vec<u64> = uids.iter().map(|&u| u as u64).collect();
+        self.sim.popgen_json(species, &uids).to_string()
+    }
+
     pub fn trait_table(&self, species: u32) -> String {
         self.sim.trait_table(species).to_string()
     }

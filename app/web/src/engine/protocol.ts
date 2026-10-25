@@ -124,6 +124,37 @@ export interface Sample {
   het: number;
 }
 
+/** Population-genetics measures of a species at one metrics sample (PRD FR-O7). */
+export interface GenSample {
+  year: number;
+  /** Expected heterozygosity of the whole species (H_T). */
+  ht: number;
+  /** Mean expected heterozygosity within patches (H_S). */
+  hs: number;
+  /** (H_T − H_S) / H_T between patches. */
+  fst: number;
+  /** Effective size from the adult sex ratio. */
+  ne: number;
+  /** Effective size from the loss of heterozygosity; null when it cannot be estimated. */
+  ne_h: number | null;
+  /** Generation time used for `ne_h`, years. */
+  generation: number;
+  /** Alleles present at loci with more than one allele. */
+  segregating: number;
+  /** Frequency of each requested allele, in request order; null where it was not tracked. */
+  freqs: (number | null)[];
+}
+
+/** What the Species panel shows for the selected species. */
+export interface SpeciesDetail {
+  id: number;
+  traits: TraitRow[];
+  metrics: Sample[];
+  popgen: GenSample[];
+  /** The alleles `popgen[].freqs` follow, in order. */
+  uids: number[];
+}
+
 /** A polymorphic allele of a species, for the allele-frequency layer (PRD FR-O1). */
 export interface AlleleInfo {
   /** Permanent allele id. */
@@ -212,7 +243,8 @@ export type ToWorker =
   | { type: "apply"; intervention: Record<string, unknown> }
   | { type: "pick"; x: number; y: number; radius: number }
   | { type: "inspect"; id: number }
-  | { type: "speciesDetail"; id: number }
+  /** `uids`: alleles whose frequency trajectories to include. */
+  | { type: "speciesDetail"; id: number; uids?: number[] }
   /** A map layer: an engine layer name, or `allele:<species>:<uid>` for an allele's frequency. */
   | { type: "layer"; kind: string }
   | { type: "alleles"; species: number }
@@ -266,7 +298,7 @@ export type FromWorker =
   | { type: "jumpDone" }
   | { type: "inspect"; id: number; data: Record<string, unknown> | null }
   | { type: "picked"; id: number }
-  | { type: "speciesDetail"; id: number; traits: TraitRow[]; metrics: Sample[] }
+  | { type: "speciesDetail"; id: number; traits: TraitRow[]; metrics: Sample[]; popgen: GenSample[]; uids: number[] }
   | { type: "layer"; kind: string; data: Float32Array }
   | { type: "alleles"; species: number; list: AlleleInfo[] }
   | { type: "saved"; bytes: ArrayBuffer }

@@ -25,7 +25,9 @@ pub const SAVE_MAGIC: &[u8; 4] = b"EVO1";
 /// Version 3 (same save layout) draws binomial and Poisson counts faster (inversion
 /// for small counts, a polar normal approximation for large ones), which changes
 /// fixed-seed outcomes in both modes.
-pub const MODEL_VERSION: u32 = 3;
+/// Version 4 (same outcomes) saves the population-genetics series (`popgen`) after the
+/// replay log; older saves load with an empty series.
+pub const MODEL_VERSION: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -120,6 +122,10 @@ pub struct Simulation {
     /// so it is not part of `state_hash()`.
     #[serde(skip)]
     pub replay: ReplayLog,
+    /// Population-genetics measures (PRD FR-O7). Saved after the replay log, so not
+    /// part of `state_hash()`: they are read from the state and never change it.
+    #[serde(skip)]
+    pub popgen: crate::popgen::PopGen,
 }
 
 impl Simulation {
@@ -200,6 +206,7 @@ impl Simulation {
                 origin: Some(origin),
                 entries: vec![],
             },
+            popgen: Default::default(),
         };
         sim.event(
             EventKind::Info,
@@ -1107,6 +1114,7 @@ impl Simulation {
             info.last_n = n;
             self.metrics.push(id, sample);
         }
+        self.record_popgen(year);
     }
 
     fn check_trait_shifts(&mut self, id: u32, mean: &[f32], sd: &[f32], year: f64) {
@@ -1356,7 +1364,8 @@ impl Simulation {
 
     // ---- Persistence ----------------------------------------------------------------------
 
-    /// Save file: magic, the state (bincode), then the replay log (JSON in a bincode string).
+    /// Save file: magic, the state (bincode), the replay log (JSON in a bincode string),
+    /// then the population-genetics series (bincode).
     pub fn save_bytes(&self) -> Result<Vec<u8>, String> {
         let mut out = SAVE_MAGIC.to_vec();
         let mut sim = bincode::serialize(self).map_err(|e| e.to_string())?;
@@ -1365,6 +1374,7 @@ impl Simulation {
         out.extend(sim);
         let log = serde_json::to_string(&self.replay).map_err(|e| e.to_string())?;
         out.extend(bincode::serialize(&log).map_err(|e| e.to_string())?);
+        out.extend(bincode::serialize(&self.popgen).map_err(|e| e.to_string())?);
         Ok(out)
     }
 
@@ -1384,6 +1394,10 @@ impl Simulation {
             let mut sim = Simulation::deserialize(&mut de).map_err(|e| corrupt(e.to_string()))?;
             let log = String::deserialize(&mut de).map_err(|e| corrupt(e.to_string()))?;
             sim.replay = serde_json::from_str(&log).map_err(|e| corrupt(e.to_string()))?;
+            if version >= 4 {
+                sim.popgen = crate::popgen::PopGen::deserialize(&mut de)
+                    .map_err(|e| corrupt(e.to_string()))?;
+            }
             sim.validate().map_err(corrupt)?;
             sim
         } else {
