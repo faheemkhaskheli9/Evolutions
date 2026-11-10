@@ -40,6 +40,8 @@ describe("describeSpeed", () => {
     expect(describeSpeed(3600)).toBe("1.0 h/s");
     expect(describeSpeed(7 * 86400)).toBe("7.0 days/s");
     expect(describeSpeed(10 * 365.25 * 86400)).toBe("10.0 years/s");
+    expect(describeSpeed(25_000 * 365.25 * 86400)).toBe("25,000 years/s");
+    expect(describeSpeed(1.5e6 * 365.25 * 86400)).toBe("1.5 My/s");
   });
 });
 

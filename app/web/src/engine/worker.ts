@@ -43,6 +43,12 @@ const autosaver = new Autosaver(writeAutosave, () => {
 
 /** Above this speed the engine uses Population mode in Auto (sim-seconds per second). */
 const POPULATION_SPEED = 30 * 86400;
+/** At or above this speed Auto uses Macro mode (PRD FR-T4). */
+const MACRO_SPEED = 10_000 * 365.25 * 86400;
+/** Jumps at least this long run in Macro mode (System Design §5). */
+const MACRO_JUMP_YEARS = 20_000;
+/** Simulated years per Macro-mode step. */
+const MACRO_STEP_YEARS = 1000;
 const AUTOSAVE_MS = 60_000;
 
 /** Checkpoints for rewind (PRD FR-T6). */
@@ -219,7 +225,7 @@ function sendFrame(full = false) {
     msg.forage = engine.layer("forage");
     transfer.push(msg.forage.buffer);
   }
-  if (status.mode === "Population" || status.focus || densityOn) {
+  if (status.mode !== "Individual" || status.focus || densityOn) {
     if (full || now - lastDensityPost > 300) {
       lastDensityPost = now;
       msg.density = engine.density(densityOn && densitySpecies !== null ? densitySpecies : -1);
@@ -250,10 +256,15 @@ function snowCover(e: Engine) {
  */
 function restoreMode() {
   if (!engine) return;
-  if (modeBeforeFocus !== null && !JSON.parse(engine.status()).focus) {
+  const focus = !!JSON.parse(engine.status()).focus;
+  if (modeBeforeFocus !== null && !focus) {
     modeChoice = modeBeforeFocus;
     modeBeforeFocus = null;
   }
+  // A long jump may have left Macro mode on, or ended its last stretch in Population mode.
+  const wantMacro = modeChoice === "Macro" || (modeChoice === "Auto" && speed >= MACRO_SPEED);
+  if (engine.mode() === "Macro" && !wantMacro) engine.set_mode("Population");
+  else if (engine.mode() === "Population" && wantMacro && !focus) engine.set_mode("Macro");
   if (modeChoice !== "Individual" || engine.mode() !== "Population") return;
   if (engine.population() <= engine.individual_cap()) {
     engine.set_mode("Individual");
@@ -266,6 +277,14 @@ function restoreMode() {
 /** Picks the fidelity mode for the requested speed (TRD TR-T3). */
 function autoMode() {
   if (!engine || modeChoice !== "Auto") return;
+  if (speed >= MACRO_SPEED) {
+    if (engine.mode() !== "Macro") {
+      engine.set_mode("Macro");
+      capExceeded = false;
+    }
+    return;
+  }
+  if (engine.mode() === "Macro") engine.set_mode("Population");
   const mode = engine.mode();
   const st = JSON.parse(engine.status());
   if (speed >= POPULATION_SPEED && mode === "Individual") {
@@ -374,6 +393,9 @@ async function jump(years: number, until?: StopCondition) {
     // Before the mode switch, so a rewind here repeats the jump exactly.
     checkpoint("jump");
     if (engine.mode() === "Individual" && years > 2) engine.set_mode("Population");
+    // Long jumps take 1,000-year Macro steps while a whole one fits, then finish in
+    // Population mode (restoreMode returns to the chosen mode afterwards).
+    const deep = years >= MACRO_JUMP_YEARS;
     const startYear = engine.year();
     const target = startYear + years;
     const seen = { events: JSON.parse(engine.status()).events as number };
@@ -383,6 +405,10 @@ async function jump(years: number, until?: StopCondition) {
     while (engine.year() < target && !cancelJump && !reason) {
       const t0 = performance.now();
       while (engine.year() < target && performance.now() - t0 < 40) {
+        if (deep) {
+          const want = target - engine.year() >= MACRO_STEP_YEARS ? "Macro" : "Population";
+          if (engine.mode() !== want) engine.set_mode(want);
+        }
         engine.step(1);
         if (until && armed && (reason = conditionMet(engine, until, seen))) break;
       }
@@ -499,6 +525,9 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
             capExceeded = true;
             fail(e);
           }
+        } else if (engine && engine.mode() === "Macro" && speed < MACRO_SPEED) {
+          // Auto at a slow speed leaves Macro mode at once, even while paused.
+          engine.set_mode("Population");
         }
         sendFrame(true);
         break;

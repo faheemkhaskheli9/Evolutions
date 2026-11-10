@@ -29,7 +29,9 @@ pub const SAVE_MAGIC: &[u8; 4] = b"EVO1";
 /// replay log; older saves load with an empty series.
 /// Version 5 (same outcomes) saves the "Why?" records (`insight`) after that series;
 /// older saves load without them.
-pub const MODEL_VERSION: u32 = 5;
+/// Version 6 (same outcomes in Individual and Population mode) adds Macro mode; saves and
+/// replay logs that use it cannot be opened by older engines.
+pub const MODEL_VERSION: u32 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -37,6 +39,23 @@ pub enum Mode {
     Individual,
     /// Demes with allele frequencies (1-year steps).
     Population,
+    /// The same demes over deep time (1,000-year steps; see `crate::macro_mode`).
+    Macro,
+}
+
+impl Mode {
+    /// Whether the world is held as demes (Population and Macro mode).
+    pub fn has_demes(self) -> bool {
+        !matches!(self, Mode::Individual)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Individual => "Individual",
+            Mode::Population => "Population",
+            Mode::Macro => "Macro",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -600,7 +619,7 @@ impl Simulation {
         }
         match self.mode {
             Mode::Individual => self.animals.extend(new),
-            Mode::Population => self.absorb_into_demes(new),
+            Mode::Population | Mode::Macro => self.absorb_into_demes(new),
         }
         self.event(
             EventKind::Founders,
@@ -627,11 +646,13 @@ impl Simulation {
 
     // ---- Stepping -----------------------------------------------------------------
 
-    /// One engine step: an hour in Individual mode, a year in Population mode.
+    /// One engine step: an hour in Individual mode, a year in Population mode,
+    /// 1,000 years in Macro mode.
     pub fn step(&mut self) {
         match self.mode {
             Mode::Individual => self.tick_individual(),
             Mode::Population => self.step_population(),
+            Mode::Macro => self.step_macro(),
         }
         self.after_step();
     }
@@ -641,6 +662,7 @@ impl Simulation {
         match self.mode {
             Mode::Individual => self.params.tick_minutes,
             Mode::Population => self.minutes_per_year() as u64,
+            Mode::Macro => (crate::macro_mode::MACRO_STEP_YEARS * self.minutes_per_year()) as u64,
         }
     }
 
@@ -696,7 +718,7 @@ impl Simulation {
         }
         let interval = match self.mode {
             Mode::Individual => 1.0 / 24.0,
-            Mode::Population => 1.0,
+            Mode::Population | Mode::Macro => 1.0,
         };
         if y - self.last_metric_year >= interval - 1e-9 {
             self.record_metrics();
@@ -738,8 +760,19 @@ impl Simulation {
         if target == self.mode {
             return Ok(());
         }
+        // Macro mode holds the same demes as Population mode, so the switch between the
+        // two changes nothing in the state.
+        if self.mode.has_demes() && target.has_demes() {
+            self.mode = target;
+            self.event(
+                EventKind::Mode,
+                None,
+                format!("Switched to {} mode.", target.label()),
+            );
+            return Ok(());
+        }
         match target {
-            Mode::Population => {
+            Mode::Population | Mode::Macro => {
                 // Restore frozen demes first so animals that wandered out of the focus
                 // region merge into them instead of forming duplicate (species, patch) demes.
                 let frozen = std::mem::take(&mut self.frozen);
@@ -748,7 +781,7 @@ impl Simulation {
                 self.absorb_into_demes(animals);
                 self.demes.sort_by_key(|d| (d.species, d.patch));
                 self.focus = None;
-                self.mode = Mode::Population;
+                self.mode = target;
             }
             Mode::Individual => {
                 let total: u64 = self.demes.iter().map(|d| d.total() as u64).sum();
@@ -762,11 +795,11 @@ impl Simulation {
                 self.mode = Mode::Individual;
             }
         }
-        let label = match target {
-            Mode::Individual => "Individual",
-            Mode::Population => "Population",
-        };
-        self.event(EventKind::Mode, None, format!("Switched to {label} mode."));
+        self.event(
+            EventKind::Mode,
+            None,
+            format!("Switched to {} mode.", target.label()),
+        );
         Ok(())
     }
 
@@ -852,7 +885,7 @@ impl Simulation {
                     *c.entry(d.species).or_insert(0) += d.total();
                 }
             }
-            Mode::Population => {
+            Mode::Population | Mode::Macro => {
                 for d in &self.demes {
                     *c.entry(d.species).or_insert(0) += d.total();
                 }
@@ -867,14 +900,14 @@ impl Simulation {
                 self.animals.len() as u64
                     + self.frozen.iter().map(|d| d.total() as u64).sum::<u64>()
             }
-            Mode::Population => self.demes.iter().map(|d| d.total() as u64).sum(),
+            Mode::Population | Mode::Macro => self.demes.iter().map(|d| d.total() as u64).sum(),
         }
     }
 
     fn species_check(&mut self) {
         let (pops, groups) = match self.mode {
             Mode::Individual => self.pops_from_animals(),
-            Mode::Population => self.pops_from_demes(),
+            Mode::Population | Mode::Macro => self.pops_from_demes(),
         };
         let pw = self.patches_w();
         let seed = self.seed;
@@ -991,7 +1024,7 @@ impl Simulation {
                         }
                     }
                 }
-                Mode::Population => {
+                Mode::Population | Mode::Macro => {
                     for (k, d) in self.demes.iter_mut().enumerate() {
                         if d.species == s.parent && members.contains(&k) {
                             d.species = id;
@@ -1082,7 +1115,7 @@ impl Simulation {
                         .add(&mean, het, d.total());
                 }
             }
-            Mode::Population => {
+            Mode::Population | Mode::Macro => {
                 for d in &self.demes {
                     let (mean, het) = d.mean_phenotype(&self.archs[d.arch as usize], &self.alleles);
                     stats

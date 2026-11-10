@@ -58,7 +58,7 @@ In the app:
 - Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons.
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
-- **Jump ahead** (+100 to +100k years) fast-forwards in Population mode.
+- **Jump ahead** (+100 to +100k years) fast-forwards in Population mode, or in Macro mode (1,000-year steps) for 20,000 years or more. The **10,000 years/s** and **1 My/s** speeds also use Macro mode; the badge at the top shows the mode in use.
 - The **Rewind** strip under the time bar holds checkpoints (every 10 simulated years, and before each jump and intervention, up to 200 MB): click one to go back to it. The Chronicle's **⟲** goes back to just before an event.
 - **Run until…** fast-forwards until a new species arises, a species goes extinct, or a population or trait crosses a threshold.
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
@@ -78,7 +78,7 @@ cargo run --release -p evo-cli -- run --template ice_age --seed 7 --years 2000 \
 cargo run --release -p evo-cli -- info out/run.evo
 ```
 
-`--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
+`--mode macro` runs in Macro mode (1,000-year steps; Population mode finishes the last part of a step); `--mode auto` (the default) uses it for runs of 20,000 years or more. `--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
 
 ## What is simulated
 
@@ -92,7 +92,8 @@ cargo run --release -p evo-cli -- info out/run.evo
 | Ecology | Grazing and plant regrowth, predation (analytic chases in Individual mode; ratio-dependent type III response with satiation, prey refuges and scavenging in Population mode), competition, carrion |
 | Evolution at scale (Population mode) | Age- and sex-structured demes per 8×8-tile patch; selection gradients from the same physiology functions; Wright–Fisher drift; mutation; migration along land borders, plus rare rafting |
 | Species | Automatic detection by reproductive compatibility (biological species concept), with hysteresis; allopatric vs parapatric/sympatric cause; generated binomial names; phylogeny with Newick export |
-| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps), switched automatically by speed; focus regions; rewind to in-session checkpoints; deterministic replay; save/load |
+| Deep time (Macro mode) | The same demes in 1,000-year steps: demography projected with the Population-mode model until it settles; trait means relax towards the optimum of the same fitness model at rate V_A·curvature (measured again every 100 years), with gene flow and drift; allele frequencies take one step of gene flow, range-wide Wright–Fisher drift, mutation and incompatibility selection, then follow the trait means. 1 My on `earth` in a few minutes |
+| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps) ↔ Macro mode (1,000-year steps), switched automatically by speed; focus regions; rewind to in-session checkpoints; deterministic replay; save/load |
 
 ## Validation
 
@@ -108,11 +109,15 @@ cargo run --release -p evo-cli -- info out/run.evo
 | V-G6 Haldane | Recombination fraction matches Haldane's map function |
 | Determinism, save/load, rewind | Same seed gives the same history; a reloaded world, or one rewound to a checkpoint, continues identically |
 | V-P1 Transitions | Individual ↔ Population switches conserve abundance, mean genetic values and diversity |
+| V-P2 Transitions | Population ↔ Macro switches conserve every deme exactly (TRD TR-X4 asks for ±5% abundance, ±0.1 SD traits); Individual ↔ Macro conserves abundance |
+| Macro mode | Deterministic, saves mid-run; the cold-adaptation cline forms in 5/5 seeds (V-B1) and populations across a strait become separate species within 65,000 years (V-S1) |
 | "Why?": drift or selection | For traits nothing selects on, change ÷ expected drift SD has mean square ≈ 1 over 120 tests; in a small Blank Slate population those changes are reported as drift; in Ice Age, hares' insulation rise is reported as selection by cold stress |
 
 `cargo test --release -- --ignored` also runs the long ecological tests:
 - **V-B1 cold-adaptation cline:** from the same founders, northern hares evolve thicker insulation than southern ones; this holds in 5/5 seeds.
 - **V-S1 allopatric speciation:** populations separated by straits accumulate incompatibilities and are detected as separate species, and the "Why?" names the open water and the main isolation factor.
+- **Macro mode tracks Population mode:** over 1,000 years from the same state, abundance stays within 25%, neutral diversity within 10% and selected trait means within 20%.
+- **Macro mode speed:** 1,000,000 years on `earth` in under 10 minutes natively.
 
 The browser app has, in `app/web/`:
 - **Unit tests** (Vitest, under a second): `npm test`. They cover formatting and colour ramps, chart ticks, map-layer pixels, the engine client, autosave (with a fake IndexedDB), and a regression test for each unit-testable web bug from the audits.
@@ -127,7 +132,7 @@ This version implements the must-have scope of the PRD, plus several later items
 
 | Design document says | v0.1 does | Why / next step |
 |---|---|---|
-| Three fidelity modes (Individual, Population, Macro) | Individual and Population only | Macro mode (species-level, 1,000-year steps) is the next milestone. Population mode runs at about 40–90 simulated years per second natively (single-threaded, depending on world size; somewhat slower in the browser), so tens of thousands of years take minutes. |
+| Macro mode works on lineages (abundance, range mask, mean traits, G-matrix) and synthesises allele frequencies when returning to Population mode | Macro mode keeps the Population-mode demes and their allele frequencies and steps them 1,000 years at a time | Switching is exact both ways, and speciation uses the same incompatibility test as Population mode. Trait means follow a per-trait Ornstein–Uhlenbeck process (TRD TR-MM2) without genetic covariances between traits. |
 | 15-minute ticks; ≥ 100,000 animals on 8 cores | 1-hour ticks; single-threaded; about 0.2 µs per animal per tick; cap of 25,000 individuals (larger worlds use focus regions) | Parallel systems (rayon) are planned for native builds. |
 | ECS (`bevy_ecs`), FlatBuffers, SQLite saves, Tauri desktop shell | Plain Rust structs; JSON plus typed arrays between worker and UI; bincode `.evo` saves; browser app only | These keep the MVP small. The engine API is ready to be wrapped by a desktop shell. |
 | Hominin traits (bipedalism, culture, pigmentation) | Hominins and apes use the general trait set (brain size, sociality, sweating, diet …) | Cultural evolution and hominin-specific traits are planned (PRD §7.5, P1). |
@@ -137,6 +142,7 @@ This version implements the must-have scope of the PRD, plus several later items
 - **Population scale:** a tile is tens to hundreds of kilometres wide for climate, while `habitat_m2_per_tile` sets how many animals it supports. Absolute numbers are scaled down; ratios and dynamics are what matter.
 - **Mutation rates:** the default *Accelerated* setting multiplies literature mutation rates by 20 and is always shown in the UI. *Strict* uses literature rates.
 - **Population mode:** to bound cost, each deme tracks at most one new allele per locus and a capped number of new mutations per year. In large demes almost all untracked mutations would be lost to drift anyway.
+- **Macro mode** adds the same number of new mutant copies as Population mode would over a step, as one new allele per locus (for trait loci, the most favoured of up to eight candidate mutations, since the others would mostly be lost). It skips year-to-year swings, and a trait under runaway selection can change more slowly than in Population mode.
 - **Predators are fragile, as they are in nature.** Whether they persist depends on prey energy and on the world. In the Earth template wolves usually coexist with hares and deer, sometimes driving deer extinct through apparent competition. In harsher templates they often die out.
 - **Speciation is slow at realistic population sizes.** It is fastest in small isolated populations, such as islands.
 

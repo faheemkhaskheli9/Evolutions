@@ -184,6 +184,20 @@ try {
         throw new Error("mode choice stayed locked to Individual after the jump");
       });
   });
+  await step("macro mode for deep time", async () => {
+    await page.getByRole("radio", { name: "Macro", exact: true }).click();
+    await page.locator(".badge", { hasText: "Macro" }).waitFor({ timeout: 10000 });
+    const hash = () => page.evaluate(() => window.__evoHash());
+    const target = (await hash()).year + 10000;
+    await page.getByRole("button", { name: "+10k yr" }).click();
+    for (let t = 0; (await hash()).year < target - 1e-6; t++) {
+      if (t > 900) throw new Error("10,000 years in Macro mode took too long");
+      await page.waitForTimeout(200);
+    }
+    // Back to Auto at a slow speed: Macro mode is left again.
+    await page.getByRole("radio", { name: "Auto", exact: true }).click();
+    await page.locator(".badge", { hasText: /Population|Individual/ }).waitFor({ timeout: 10000 });
+  });
   await step("climate intervention is logged", async () => {
     await page.getByRole("button", { name: "-2 °C" }).click();
     await page.getByRole("tab", { name: /Chronicle/ }).click();

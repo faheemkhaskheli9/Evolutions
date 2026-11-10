@@ -121,17 +121,15 @@ impl Engine {
     }
 
     pub fn mode(&self) -> String {
-        match self.sim.mode {
-            Mode::Individual => "Individual".into(),
-            Mode::Population => "Population".into(),
-        }
+        self.sim.mode.label().into()
     }
 
     pub fn set_mode(&mut self, mode: &str) -> Result<(), JsError> {
         let m = match mode {
             "Individual" => Mode::Individual,
             "Population" => Mode::Population,
-            _ => return Err(JsError::new("mode must be Individual or Population")),
+            "Macro" => Mode::Macro,
+            _ => return Err(JsError::new("mode must be Individual, Population or Macro")),
         };
         self.sim.set_mode(m).map_err(err)
     }

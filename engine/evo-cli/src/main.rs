@@ -7,7 +7,11 @@
 //! evo info run.evo
 //! ```
 
+use evo_engine::macro_mode::MACRO_STEP_YEARS;
 use evo_engine::{Mode, NewWorld, Realism, Simulation};
+
+/// Runs at least this long use Macro mode in `--mode auto` (System Design §5).
+const AUTO_MACRO_YEARS: f64 = 20_000.0;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -19,7 +23,8 @@ fn usage() -> ! {
       --template <key|random>  (default earth)
       --seed <u64>             (default 1)
       --years <f64>            (default 100)
-      --mode auto|individual|population   (default auto)
+      --mode auto|individual|population|macro   (default auto; auto uses Macro mode
+                               for stretches of 20,000 years or more)
       --individual-years <f64> years to watch individually before switching in auto mode (default 1)
       --strict                 literature mutation rates instead of accelerated
       --load <file.evo>        continue a saved run instead of creating one
@@ -160,8 +165,8 @@ fn main() {
                 std::process::exit(2)
             }
             let mode = o.get("mode").map(|s| s.as_str()).unwrap_or("auto");
-            if !["auto", "individual", "population"].contains(&mode) {
-                eprintln!("--mode must be auto, individual or population (got '{mode}')");
+            if !["auto", "individual", "population", "macro"].contains(&mode) {
+                eprintln!("--mode must be auto, individual, population or macro (got '{mode}')");
                 std::process::exit(2)
             }
             let quiet = o.contains_key("quiet");
@@ -196,7 +201,7 @@ fn main() {
             let start_year = sim.year();
             let end_year = start_year + years;
             let mut last_report = sim.year();
-            if mode == "population" {
+            if mode == "population" || mode == "macro" {
                 let _ = sim.set_mode(Mode::Population);
             } else if mode == "individual" {
                 if let Err(e) = sim.set_mode(Mode::Individual) {
@@ -211,8 +216,22 @@ fn main() {
                 {
                     let _ = sim.set_mode(Mode::Population);
                 }
+                // Macro mode takes 1,000-year steps while at least one fits before the
+                // end (in auto mode, only for a long run); Population mode finishes.
+                let left = end_year - sim.year();
+                let deep = mode == "macro" || (mode == "auto" && years >= AUTO_MACRO_YEARS);
+                if deep && sim.mode.has_demes() {
+                    let want = if left >= MACRO_STEP_YEARS {
+                        Mode::Macro
+                    } else {
+                        Mode::Population
+                    };
+                    if sim.mode != want {
+                        let _ = sim.set_mode(want);
+                    }
+                }
                 sim.step();
-                if o.contains_key("debug") && sim.mode == Mode::Population {
+                if o.contains_key("debug") && sim.mode.has_demes() {
                     let mut by: std::collections::BTreeMap<
                         u32,
                         (u32, evo_engine::population::Annual),

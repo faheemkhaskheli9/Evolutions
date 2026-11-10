@@ -8,6 +8,7 @@
   --accent: #6fcf8a;
   --accent-ink: #0b2014;
   --warn: #ffd54a;
+  --macro: #a9b8ff;
   --danger: #ff7a6b;
   --ocean: #163257;
   --up: #7fd39b;
@@ -30,6 +31,7 @@
     --ocean: #2c5a8a;
     --up: #1e8a45;
     --down: #c4402f;
+    --macro: #3f55c4;
     color-scheme: light;
   }
 }
@@ -226,6 +228,10 @@ h4 {
 .badge.mode-population {
   background: rgba(255, 213, 74, 0.14);
   color: var(--warn);
+}
+.badge.mode-macro {
+  background: rgba(120, 140, 240, 0.16);
+  color: var(--macro);
 }
 .actions {
   display: flex;

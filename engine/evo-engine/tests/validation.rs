@@ -1334,3 +1334,281 @@ fn why_crash_from_plague_and_saves() {
     old.run_years(3.0);
     assert!(!old.insight.recent[&0].is_empty());
 }
+
+// ---- Macro mode (PRD FR-T4, TRD §5.12) ------------------------------------------------
+
+fn population_world(seed: u64, years: f64) -> Simulation {
+    let mut s = blank(seed);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(years);
+    s
+}
+
+/// Per species: abundance, mean phenotype and neutral heterozygosity, from the demes.
+fn deme_summary(s: &Simulation) -> Vec<(u32, u64, Vec<f32>, f32)> {
+    let mut by: std::collections::BTreeMap<u32, (u64, Vec<f64>, f64)> = Default::default();
+    for d in &s.demes {
+        let (mean, het) = d.mean_phenotype(&s.archs[d.arch as usize], &s.alleles);
+        let n = d.total() as f64;
+        let e = by.entry(d.species).or_insert((0, vec![0.0; N_TRAITS], 0.0));
+        e.0 += d.total() as u64;
+        for (sum, m) in e.1.iter_mut().zip(mean) {
+            *sum += m as f64 * n;
+        }
+        e.2 += het as f64 * n;
+    }
+    by.into_iter()
+        .map(|(sp, (n, m, h))| {
+            let w = n.max(1) as f64;
+            (
+                sp,
+                n,
+                m.iter().map(|x| (x / w) as f32).collect(),
+                (h / w) as f32,
+            )
+        })
+        .collect()
+}
+
+/// V-P2 Population ↔ Macro transitions conserve abundance, mean traits and neutral
+/// diversity (TRD TR-X4: ±5%, ±0.1 SD, ±10%). Macro mode holds the same demes, so they
+/// are conserved exactly; Individual ↔ Macro goes through the same aggregation as
+/// Individual ↔ Population.
+#[test]
+fn v_p2_population_macro_transitions_conserve_state() {
+    let mut s = population_world(61, 30.0);
+    let before = deme_summary(&s);
+    let demes = bincode::serialize(&s.demes).unwrap();
+    s.set_mode(Mode::Macro).unwrap();
+    assert_eq!(s.mode, Mode::Macro);
+    assert_eq!(
+        bincode::serialize(&s.demes).unwrap(),
+        demes,
+        "P → M changed demes"
+    );
+    s.set_mode(Mode::Population).unwrap();
+    assert_eq!(
+        bincode::serialize(&s.demes).unwrap(),
+        demes,
+        "M → P changed demes"
+    );
+    assert_eq!(deme_summary(&s), before);
+
+    // A Macro step takes 1,000 years and keeps the species alive.
+    s.set_mode(Mode::Macro).unwrap();
+    let y0 = s.year();
+    s.step();
+    assert!(
+        (s.year() - y0 - 1000.0).abs() < 1e-6,
+        "{} → {}",
+        y0,
+        s.year()
+    );
+    assert!(s.population() > 0);
+    let after = deme_summary(&s);
+    // Then switching back is exact again.
+    s.set_mode(Mode::Population).unwrap();
+    assert_eq!(deme_summary(&s), after);
+
+    // Individual → Macro aggregates as Individual → Population does.
+    let mut i = blank(62);
+    i.run_steps(24 * 30);
+    let counts = i.species_counts();
+    i.set_mode(Mode::Macro).unwrap();
+    assert_eq!(i.mode, Mode::Macro);
+    assert_eq!(i.species_counts(), counts, "I → M changed abundance");
+    i.set_mode(Mode::Individual).unwrap();
+    assert_eq!(i.species_counts(), counts, "M → I changed abundance");
+}
+
+/// Macro mode is deterministic and survives a save and reload mid-run.
+#[test]
+fn macro_mode_is_deterministic_and_saves() {
+    let run = |s: &mut Simulation| {
+        s.set_mode(Mode::Macro).unwrap();
+        s.run_steps(3);
+        s.state_hash()
+    };
+    let mut a = population_world(63, 20.0);
+    let mut b = population_world(63, 20.0);
+    assert_eq!(run(&mut a), run(&mut b));
+    let mut c = Simulation::load_bytes(&a.save_bytes().unwrap()).unwrap();
+    assert_eq!(c.mode, Mode::Macro);
+    a.run_steps(2);
+    c.run_steps(2);
+    assert_eq!(a.state_hash(), c.state_hash());
+}
+
+/// Macro mode follows Population mode: over 1,000 years from the same state, abundance
+/// stays within 25%, neutral diversity within 10% and the mean of each trait selection
+/// acts on within 20% (litter size, which runs away in Population mode, differs most).
+#[test]
+#[ignore = "long: about 20 s in release"]
+fn macro_mode_tracks_population_mode() {
+    let start = population_world(5, 200.0);
+    let bytes = start.save_bytes().unwrap();
+    let mut p = Simulation::load_bytes(&bytes).unwrap();
+    let mut m = Simulation::load_bytes(&bytes).unwrap();
+    p.run_years(1000.0);
+    m.set_mode(Mode::Macro).unwrap();
+    m.run_years(1000.0);
+    let (sp, sm) = (deme_summary(&p), deme_summary(&m));
+    let s0 = deme_summary(&start);
+    for ((a, b), o) in sp.iter().zip(&sm).zip(&s0) {
+        eprintln!("species {}: n {} (population) vs {} (macro)", a.0, a.1, b.1);
+        let rel = (a.1 as f64 - b.1 as f64).abs() / a.1 as f64;
+        assert!(rel < 0.25, "abundance {} vs {}", a.1, b.1);
+        assert!(
+            (a.3 - b.3).abs() / a.3 < 0.1,
+            "heterozygosity {} vs {}",
+            a.3,
+            b.3
+        );
+        for t in [
+            Trait::BodyMass,
+            Trait::Insulation,
+            Trait::Appendage,
+            Trait::LegLength,
+            Trait::LitterSize,
+            Trait::Kidney,
+            Trait::HeatTolerance,
+        ] {
+            let i = t as usize;
+            let (x, y, x0) = (a.2[i], b.2[i], o.2[i]);
+            eprintln!("  {t:?}: start {x0:.3}, population {x:.3}, macro {y:.3}");
+            assert!((x - y).abs() <= 0.2 * x.abs(), "{t:?}: {x} vs {y}");
+        }
+    }
+}
+
+/// V-B1 in Macro mode: northern populations end up better insulated than southern ones.
+#[test]
+fn v_b1_cold_adaptation_cline_in_macro_mode() {
+    let mut wins = 0;
+    let seeds = 5;
+    for seed in 0..seeds {
+        let mut s = gradient_world(
+            150 + seed,
+            vec![FounderGroup {
+                species: "hare".into(),
+                count: 400,
+                diversity: 0.8,
+                region: Some((0.5, 0.5, 0.2)),
+                delay_years: 0.0,
+            }],
+        );
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(50.0);
+        s.set_mode(Mode::Macro).unwrap();
+        s.run_years(10_000.0);
+        let (north, south) = latitudinal_means(&s, 0, Trait::Insulation);
+        eprintln!("seed {seed}: insulation north {north:.3} south {south:.3}");
+        if north > south {
+            wins += 1;
+        }
+    }
+    assert!(
+        wins >= 4,
+        "cold populations were better insulated in only {wins}/{seeds} seeds"
+    );
+}
+
+/// V-S1 in Macro mode: populations on either side of a strait become separate species.
+#[test]
+fn v_s1_allopatric_speciation_in_macro_mode() {
+    let mut s = fst_world_split(77);
+    s.set_mode(Mode::Macro).unwrap();
+    let mut years = 0;
+    while s.species.alive().count() < 2 && years < 200_000 {
+        s.run_years(1000.0);
+        years += 1000;
+    }
+    eprintln!("speciation after ≤ {years} years");
+    assert!(
+        s.species.alive().count() >= 2,
+        "no speciation across the barrier"
+    );
+    let (index, _) = s
+        .events
+        .iter()
+        .enumerate()
+        .find(|(_, e)| e.kind == evo_engine::record::EventKind::Speciation)
+        .unwrap();
+    let why = &s.insight.why[&(index as u32)];
+    eprintln!("{}", why.summary);
+    assert_eq!(why.cause.as_deref(), Some("allopatric"));
+}
+
+/// The V-S1 world: mice on both sides of two straits, from one founder population, with
+/// small demes and fast mutation.
+fn fst_world_split(seed: u64) -> Simulation {
+    let mut s = Simulation::new(NewWorld {
+        template: "blank".into(),
+        seed,
+        gen: None,
+        founders: Some(vec![FounderGroup {
+            species: "mouse".into(),
+            count: 400,
+            diversity: 0.8,
+            region: Some((0.15, 0.5, 0.1)),
+            delay_years: 0.0,
+        }]),
+        realism: None,
+    })
+    .unwrap();
+    let w = s.world.w;
+    for y in 0..s.world.h {
+        for x in (w / 2 - 2..w / 2 + 2).chain(0..2).chain(w - 2..w) {
+            let i = y * w + x;
+            s.world.water[i] = evo_engine::world::Water::Ocean;
+            s.world.elevation[i] = -100.0;
+        }
+    }
+    s.world.refresh_biomes();
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(50.0);
+    let pw = s.patches_w() as u32;
+    let east: Vec<_> = s
+        .demes
+        .iter()
+        .filter(|d| d.patch % pw < pw / 2 - 1)
+        .map(|d| {
+            let mut c = d.clone();
+            c.patch = d.patch + pw / 2 + 1;
+            c
+        })
+        .collect();
+    s.demes.extend(east);
+    s.demes.sort_by_key(|d| (d.species, d.patch));
+    s.params.habitat_m2_per_tile = 12.0;
+    s.params.mutation_multiplier = 60.0;
+    s
+}
+
+/// PRD §9: a million years on `earth` in under ten minutes (natively, in release).
+#[test]
+#[ignore = "long: a few minutes in release"]
+fn macro_mode_runs_a_million_years_on_earth_in_ten_minutes() {
+    let mut s = Simulation::new(NewWorld {
+        template: "earth".into(),
+        seed: 1,
+        gen: None,
+        founders: None,
+        realism: None,
+    })
+    .unwrap();
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(100.0);
+    s.set_mode(Mode::Macro).unwrap();
+    let t = std::time::Instant::now();
+    s.run_years(1_000_000.0);
+    let secs = t.elapsed().as_secs_f64();
+    eprintln!(
+        "1 My in {secs:.0} s; {} species alive of {}; {} demes",
+        s.species.alive().count(),
+        s.species.list.len(),
+        s.demes.len()
+    );
+    assert!(s.population() > 0);
+    assert!(secs < 600.0, "1 My took {secs:.0} s");
+}

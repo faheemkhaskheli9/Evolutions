@@ -131,7 +131,7 @@ export default function App() {
             f.actions = m.actions;
             f.ids = m.ids;
             f.shape = m.shape;
-          } else if (m.status.mode === "Population") {
+          } else if (m.status.mode !== "Individual") {
             f.positions = undefined;
             f.species = undefined;
             f.actions = undefined;
@@ -437,7 +437,7 @@ export default function App() {
           <div className="world-meta">
             <span className="world-name">{world.info.template}</span>
             <span className="date">{formatDate(status.year, status.day_of_year, status.hour)}</span>
-            <span className={`badge mode-${status.mode.toLowerCase()}`} title="Individual: every animal simulated hourly. Population: groups simulated yearly with the same biology.">
+            <span className={`badge mode-${status.mode.toLowerCase()}`} title="Individual: every animal simulated hourly. Population: groups simulated yearly with the same biology. Macro: the same groups in 1,000-year steps, for deep time.">
               {status.mode}
               {status.focus ? " · region" : ""}
             </span>
@@ -503,7 +503,7 @@ export default function App() {
               ))}
             </div>
           )}
-          {capExceeded && status?.mode === "Population" && (
+          {capExceeded && status && status.mode !== "Individual" && (
             <div className="map-hint">
               {status.population.toLocaleString()} organisms is more than can be simulated one by one. Shift-drag on the map (or use <b>Watch region</b>) to watch a region
               individually.

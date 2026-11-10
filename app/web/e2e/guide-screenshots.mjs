@@ -71,7 +71,7 @@ try {
 
   console.log("2. Watching individuals");
   await page.getByRole("radio", { name: "1 day/s" }).click();
-  await page.getByRole("button", { name: "Play" }).click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
   await page.waitForTimeout(5000);
   await page.getByRole("button", { name: "Pause" }).click();
   const zoomPoint = await animalOnScreen();
@@ -96,6 +96,13 @@ try {
   await jump("+1k yr");
   await page.waitForTimeout(800);
   await shot("09-population-mode");
+  await page.getByRole("tab", { name: "World" }).click();
+  await page.getByRole("radio", { name: "Macro", exact: true }).click();
+  await jump("+10k yr");
+  await page.waitForTimeout(800);
+  await shot("26-macro-mode");
+  await page.getByRole("radio", { name: "Auto", exact: true }).click();
+  await page.waitForTimeout(500);
 
   console.log("4. Species, tree, chronicle");
   await page.getByRole("tab", { name: "Species" }).click();
@@ -164,7 +171,7 @@ try {
   await noToasts();
   await zoomAt(rx + (b.width * size) / 2, ry + (b.height * size * 1.5) / 2, 4);
   await page.getByRole("radio", { name: "1 hour/s" }).click();
-  await page.getByRole("button", { name: "Play" }).click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
   await page.waitForTimeout(2500);
   await page.getByRole("button", { name: "Pause" }).click();
   await noToasts();

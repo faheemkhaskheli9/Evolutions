@@ -37,13 +37,18 @@ export const SPEEDS: { label: string; value: number }[] = [
   { label: "1 year/s", value: 365.25 * 86400 },
   { label: "10 years/s", value: 10 * 365.25 * 86400 },
   { label: "100 years/s", value: 100 * 365.25 * 86400 },
+  { label: "10,000 years/s", value: 10_000 * 365.25 * 86400 },
+  { label: "1 My/s", value: 1_000_000 * 365.25 * 86400 },
 ];
 
 export function describeSpeed(simSecondsPerSecond: number): string {
   const s = simSecondsPerSecond;
   if (s < 86400) return `${(s / 3600).toFixed(1)} h/s`;
   if (s < 365 * 86400) return `${(s / 86400).toFixed(1)} days/s`;
-  return `${(s / (365.25 * 86400)).toFixed(1)} years/s`;
+  const years = s / (365.25 * 86400);
+  if (years >= 1e6) return `${(years / 1e6).toFixed(1)} My/s`;
+  if (years >= 1e4) return `${Math.round(years).toLocaleString("en-US")} years/s`;
+  return `${years.toFixed(1)} years/s`;
 }
 
 /**

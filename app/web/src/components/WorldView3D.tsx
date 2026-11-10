@@ -90,7 +90,7 @@ export function WorldView3D(props: Props) {
     const rangesVisible = layer === "terrain" || layer === "population";
     if (snow && rangesVisible) ctx.drawImage(snow, 0, 0);
     if (overlay) ctx.drawImage(overlay, 0, 0);
-    const showRanges = rangesVisible && !!f.density && !!f.dominant && (f.mode === "Population" || !!f.focus || layer === "population");
+    const showRanges = rangesVisible && !!f.density && !!f.dominant && (f.mode !== "Individual" || !!f.focus || layer === "population");
     if (showRanges) ctx.drawImage(buildDemes(world, f.density!, f.dominant!, speciesColors, layer === "population"), 0, 0);
     scene.setTexture(c);
     // The clock first: the inspected animal's path is stamped with the current day.

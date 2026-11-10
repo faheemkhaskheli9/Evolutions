@@ -23,7 +23,7 @@ use crate::sim::{Mode, Simulation};
 use crate::species::PopSummary;
 use crate::traits::{Phenotype, Trait, N_TRAITS};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// What pushes a trait's fitness up or down: five hazards, ageing and reproduction.
 pub const N_DRIVERS: usize = 7;
@@ -315,12 +315,16 @@ fn fmt_n(x: f64) -> String {
 }
 
 /// Per-trait genetic mean and additive variance (latent scale) of pooled allele counts.
+/// Copies per allele, in the order first counted, with an index by allele id.
+type Counts = (Vec<(u32, f64)>, HashMap<u32, usize>);
+
 struct Pooled {
     arch: u16,
     /// Diploids counted.
     n: f64,
-    /// Per trait locus (in `arch.trait_loci` order): (allele, copies).
-    pools: Vec<Vec<(u32, f64)>>,
+    /// Per trait locus (in `arch.trait_loci` order): (allele, copies) in the order first
+    /// counted, and an index by allele.
+    pools: Vec<Counts>,
 }
 
 impl Simulation {
@@ -357,7 +361,7 @@ impl Simulation {
         self.insight.last_exposure_year = year;
         let climate = self.world.global_offset;
 
-        if self.mode == Mode::Population && !self.selection.is_empty() {
+        if self.mode.has_demes() && !self.selection.is_empty() {
             self.vitals_from_demes(year, climate);
             self.insight.acc.clear();
             self.insight.acc_since = year;
@@ -533,13 +537,15 @@ impl Simulation {
         let new_pool = |arch: u16, loci: usize| Pooled {
             arch,
             n: 0.0,
-            pools: vec![Vec::new(); loci],
+            pools: vec![Default::default(); loci],
         };
-        let add =
-            |pool: &mut Vec<(u32, f64)>, x: u32, c: f64| match pool.iter_mut().find(|p| p.0 == x) {
-                Some(p) => p.1 += c,
-                None => pool.push((x, c)),
-            };
+        let add = |pool: &mut Counts, x: u32, c: f64| match pool.1.get(&x) {
+            Some(&i) => pool.0[i].1 += c,
+            None => {
+                pool.1.insert(x, pool.0.len());
+                pool.0.push((x, c));
+            }
+        };
         for a in &self.animals {
             let arch = &self.archs[a.arch as usize];
             let e = pooled
@@ -554,7 +560,7 @@ impl Simulation {
         }
         let demes = match self.mode {
             Mode::Individual => &self.frozen,
-            Mode::Population => &self.demes,
+            Mode::Population | Mode::Macro => &self.demes,
         };
         for d in demes {
             let n = d.total() as f64;
@@ -583,7 +589,7 @@ impl Simulation {
             }
             let mut va = [0f64; N_TRAITS];
             let copies = 2.0 * p.n;
-            for pool in &p.pools {
+            for (pool, _) in &p.pools {
                 // Per-locus mean effect on each trait, then the variance around it.
                 let mut locus_mean = [0f64; N_TRAITS];
                 let effect = |x: u32| {
@@ -618,7 +624,7 @@ impl Simulation {
                 // how many young they raise, so in Individual mode Nₑ is lower: the
                 // estimate from lost heterozygosity is used when it is.
                 Some(g) => match self.mode {
-                    Mode::Population => (g.ne, 1.0),
+                    Mode::Population | Mode::Macro => (g.ne, 1.0),
                     Mode::Individual => {
                         let ne = if g.ne_h > 0.0 { g.ne.min(g.ne_h) } else { g.ne };
                         (ne, g.generation)

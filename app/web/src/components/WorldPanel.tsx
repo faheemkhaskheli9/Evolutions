@@ -136,15 +136,16 @@ export function WorldPanel(p: Props) {
 
       <h3>Simulation detail</h3>
       <div className="segmented" role="radiogroup" aria-label="Fidelity mode">
-        {(["Auto", "Individual", "Population"] as ModeChoice[]).map((m) => (
+        {(["Auto", "Individual", "Population", "Macro"] as ModeChoice[]).map((m) => (
           <button key={m} role="radio" aria-checked={p.modeChoice === m} className={p.modeChoice === m ? "active" : ""} onClick={() => p.setMode(m)}>
             {m}
           </button>
         ))}
       </div>
       <p className="muted small">
-        <b>Individual</b>: every animal lives hour by hour. <b>Population</b>: groups evolve year by year using the same biology — needed for deep time. Auto picks by
-        speed. To watch animals in a crowded world, choose <b>Watch region</b> and drag a box on the map.
+        <b>Individual</b>: every animal lives hour by hour. <b>Population</b>: groups evolve year by year using the same biology. <b>Macro</b>: the same groups in
+        1,000-year steps, for millions of years — it skips year-to-year swings such as population cycles. Auto picks by speed. To watch animals in a crowded world,
+        choose <b>Watch region</b> and drag a box on the map.
       </p>
       <div className="chips">
         <button className={`chip ${p.tool === "focus" ? "active" : ""}`} onClick={() => p.setTool(p.tool === "focus" ? "inspect" : "focus")}>
