@@ -10,7 +10,7 @@ All screenshots come from a single run of the Earth-like Continent template, see
 2. [The main screen](#2-the-main-screen)
 3. [Watch individual animals](#3-watch-individual-animals)
 4. [Control time](#4-control-time)
-5. [Individual and Population modes](#5-individual-and-population-modes)
+5. [Individual, Population and Macro modes](#5-individual-population-and-macro-modes)
 6. [Species: populations and traits over time](#6-species-populations-and-traits-over-time)
 7. [Tree of life](#7-tree-of-life)
 8. [Chronicle](#8-chronicle)
@@ -140,9 +140,9 @@ If the animal dies (or, while you watch a region, walks out of it), the Inspecto
 | Control | What it does |
 |---|---|
 | **▶ / ❚❚** | Play or pause (**Space**). |
-| **Speed presets** | **1 hour/s**, **1 day/s** and **1 week/s** suit watching animals. From **1 month/s** up, Auto mode switches to Population mode, so these suit watching populations and evolution. |
+| **Speed presets** | **1 hour/s**, **1 day/s** and **1 week/s** suit watching animals. From **1 month/s** up, Auto mode switches to Population mode, so these suit watching populations and evolution. **10,000 years/s** and **1 My/s** switch to Macro mode for deep time. |
 | **≈ speed** | The speed actually achieved, averaged over about a second. Very large worlds may run slower than the preset. |
-| **Jump ahead +100 / +1k / +10k / +100k yr** | Fast-forwards that many years as fast as possible. |
+| **Jump ahead +100 / +1k / +10k / +100k yr** | Fast-forwards that many years as fast as possible. Jumps of 20,000 years or more use Macro mode. |
 | **Run until…** | Fast-forwards until something happens (see [section 10](#10-run-until-something-happens)). |
 
 During a jump, a progress card shows the year reached. **Stop here** ends the jump at the current year. Play, pause and the jump buttons are disabled until the jump ends. If every organism dies during a jump, it stops and says so.
@@ -163,25 +163,47 @@ The **Rewind** strip under the time bar runs from the start of the world (left) 
 
 ---
 
-## 5. Individual and Population modes
+## 5. Individual, Population and Macro modes
 
-Simulating every animal hour by hour is too slow for thousands of years, so Evolutions has two levels of detail. Both use the same biology.
+Simulating every animal hour by hour is too slow for thousands of years, so Evolutions has three levels of detail. All three use the same biology.
 
 | Mode | What is simulated | Used for |
 |---|---|---|
 | **Individual** | Every organism, one hour at a time. | Watching behaviour; short spans of time. |
-| **Population** | Groups (demes) in each 8 × 8-tile patch, one year at a time. Each group tracks its age structure and the frequency of every gene variant, under selection, drift, mutation and migration. | Centuries to hundreds of thousands of years. |
+| **Population** | Groups (demes) in each 8 × 8-tile patch, one year at a time. Each group tracks its age structure and the frequency of every gene variant, under selection, drift, mutation and migration. | Centuries to tens of thousands of years. |
+| **Macro** | The same groups, 1,000 years at a time. | Hundreds of thousands to millions of years: adaptive radiations, speciation and extinction. |
 
 ![Population mode after 2,000 years: species ranges coloured over the terrain](guide/09-population-mode.png)
 
 In Population mode the 3D world shows each population as a few translucent figures per area in its species' colour (more where it is denser), and species ranges as colour over the terrain. Each tile takes the colour of its most abundant species, more strongly where that species is denser.
 
-**Choosing the mode.** In the **World** tab, **Simulation detail** has three settings:
+**Choosing the mode.** In the **World** tab, **Simulation detail** has four settings:
 
-- **Auto** (default) uses Individual mode up to about 1 week/s and switches to Population mode at higher speeds and for jumps. It also switches if the population grows too large to follow one by one (more than 25,000 animals).
-- **Individual** or **Population** keeps that mode while time plays. Two things still override **Individual**:
-  - jumps of more than 2 years always run in Population mode; afterwards the app returns to Individual mode if the world is small enough;
+- **Auto** (default) uses Individual mode up to about 1 week/s, Population mode at higher speeds and for jumps, and Macro mode at 10,000 years/s and above and for jumps of 20,000 years or more. It also switches to Population mode if the population grows too large to follow one by one (more than 25,000 animals). Slowing down switches back.
+- **Individual**, **Population** or **Macro** keeps that mode while time plays. Some things still override the choice:
+  - jumps of more than 2 years always run in Population mode or, for 20,000 years or more, in Macro mode; afterwards the app returns to the chosen mode, or to Individual mode only if the world is small enough;
   - a world of more than 25,000 animals can't be simulated one by one. The app switches to Population mode and suggests watching a region instead (see [section 11](#11-watch-a-region-in-a-crowded-world)).
+
+The badge at the top shows the mode in use: **Individual**, **Population** (yellow) or **Macro** (blue). Switching between Population and Macro mode changes nothing in the world: both hold the same groups.
+
+### Macro mode
+
+![Macro mode after a 10,000-year jump](guide/26-macro-mode.png)
+
+Macro mode moves 1,000 years per step, so a million years takes a few minutes. Each step:
+
+1. **Numbers and range:** each group's births, deaths and dispersal are worked out with the Population-mode model for 40 years, with traits held fixed, so numbers and the range settle. A decline that isn't caused by crowding (the group has enough food) continues for the rest of the step. Numbers are then rounded with chance, so small groups can die out.
+2. **Traits:** each trait's average moves towards the value natural selection favours there, at a speed set by its genetic variation. Every 100 years the step measures again how survival and reproduction change with the trait, because traits evolve together and the best value shifts as they do. Gene flow pulls neighbouring groups together, and drift adds chance changes, larger in small groups.
+3. **Genes:** gene variants flow between neighbouring groups, drift (connected groups drift together), mutate and are selected against in hybrid-incompatible combinations. Their frequencies are then adjusted so each group's traits match step 2.
+
+New species are detected as in Population mode, from accumulated incompatibilities and mating differences.
+
+**What Macro mode leaves out:**
+- year-to-year swings: population cycles, a bad winter, a predator boom and bust. You see where numbers settle each 1,000 years, not the path in between;
+- the order of events within a step: an intervention or climate change takes effect at the next step;
+- fine detail of selection: traits change in step with Population mode only on average. Over 1,000 years they stay within about 20% of a Population-mode run from the same start, and numbers within about 25%. A trait under runaway selection may change more slowly than in Population mode.
+
+For a close look at any period, slow down or jump less than 20,000 years: the world continues in Population mode from exactly where Macro mode left it.
 
 ---
 
@@ -257,7 +279,7 @@ Adaptations, population crashes, extinctions and new species have a **Why?** lin
 
 **The numbers** opens the values behind the answer, and the link at the bottom opens the chart that shows it (the trait's chart, the population chart, or the tree).
 
-In Population mode the gradient comes from the same fitness model that moves allele frequencies, and allele frequencies are resampled every year, so each year counts as one generation of drift. In Individual mode the hazards are measured from what the animals actually died of. Worlds saved before this feature have no explanations for their earlier events; new events are explained from the moment the world is opened.
+In Population mode the gradient comes from the same fitness model that moves allele frequencies, and allele frequencies are resampled every year, so each year counts as one generation of drift. Macro mode uses the same fitness model and the same yearly drift, measured at the start of each 1,000-year step. In Individual mode the hazards are measured from what the animals actually died of. Worlds saved before this feature have no explanations for their earlier events; new events are explained from the moment the world is opened.
 
 ---
 
@@ -406,7 +428,7 @@ When the replay ends, a message says whether the world is identical to the origi
 - **See a bottleneck:** strike a species with a 90% epidemic, then watch its neutral genetic diversity in the Species tab.
 - **See predator–prey dynamics:** in the Earth-like template, watch the wolf and hare population charts after the wolves arrive in year 40. Abundant hares can sustain enough wolves to wipe out the scarcer deer (apparent competition).
 - **See speciation:** use small isolated populations (**Archipelago**, **Island Dwarfism Lab**) and **Run until… a new species arises** with a 100,000-year cap.
-- **Be patient with deep time:** Population mode runs at roughly 40–90 simulated years per second, depending on world size. 100,000 years takes a few minutes.
+- **Deep time:** Population mode runs at roughly 40–90 simulated years per second, depending on world size, so use it for up to tens of thousands of years. For longer spans, jump 100,000 years or play at **10,000 years/s** or **1 My/s**: Macro mode covers a million years in a few minutes.
 - **Strict vs Accelerated:** with **Strict** mutation rates, adaptation relies mostly on the variation founders already carry. That is realistic for short spans, but expect little change in new traits.
 
 For how the biology works under the hood, see the [Technical Requirements](TRD.md). For the architecture, see the [System Design](SYSTEM_DESIGN.md).

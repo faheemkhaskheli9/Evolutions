@@ -6,9 +6,10 @@
 //! through selection, drift, mutation and gene flow; species are detected from
 //! reproductive isolation.
 //!
-//! Two fidelity modes share one biological model (see `docs/TRD.md` §4.2):
-//! **Individual** (hourly ticks, every animal simulated) and **Population**
-//! (yearly steps, demes with allele frequencies) for fast-forwarding.
+//! Three fidelity modes share one biological model (see `docs/TRD.md` §4.2):
+//! **Individual** (hourly ticks, every animal simulated), **Population**
+//! (yearly steps, demes with allele frequencies) for fast-forwarding, and **Macro**
+//! (the same demes in 1,000-year steps) for deep time.
 //!
 //! ```
 //! use evo_engine::{NewWorld, Simulation};
@@ -27,6 +28,7 @@ pub mod explain;
 pub mod export;
 pub mod genetics;
 pub mod individual;
+pub mod macro_mode;
 pub mod noise;
 pub mod params;
 pub mod physiology;

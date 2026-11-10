@@ -77,19 +77,33 @@ impl PopGen {
     }
 }
 
-/// Gene copies per allele at one locus: (allele id, copies).
-type Pool = Vec<(u32, f64)>;
+/// Gene copies per allele at one locus: (allele id, copies), in the order alleles were
+/// first counted, with an index by allele id.
+#[derive(Clone, Default)]
+struct Pool {
+    v: Vec<(u32, f64)>,
+    at: std::collections::HashMap<u32, usize>,
+}
+
+impl Pool {
+    fn iter(&self) -> std::slice::Iter<'_, (u32, f64)> {
+        self.v.iter()
+    }
+}
 
 fn add(pool: &mut Pool, allele: u32, copies: f64) {
-    match pool.iter_mut().find(|x| x.0 == allele) {
-        Some(x) => x.1 += copies,
-        None => pool.push((allele, copies)),
+    match pool.at.get(&allele) {
+        Some(&i) => pool.v[i].1 += copies,
+        None => {
+            pool.at.insert(allele, pool.v.len());
+            pool.v.push((allele, copies));
+        }
     }
 }
 
 /// Unbiased expected heterozygosity (Nei 1978) of one locus from `n` diploids:
 /// 2n/(2n − 1) · (1 − Σp²).
-fn expected_het(pool: &Pool, n: f64) -> f64 {
+fn expected_het(pool: &[(u32, f64)], n: f64) -> f64 {
     let copies = 2.0 * n;
     if copies < 2.0 {
         return 0.0;
@@ -153,7 +167,7 @@ impl Simulation {
         let mut acc: BTreeMap<u32, Acc> = BTreeMap::new();
         let new_acc = |arch: u16, loci: usize| Acc {
             arch,
-            total: vec![Vec::new(); loci],
+            total: vec![Pool::default(); loci],
             ..Default::default()
         };
         for a in &self.animals {
@@ -171,7 +185,7 @@ impl Simulation {
             let p = e
                 .patches
                 .entry(patch)
-                .or_insert_with(|| (0.0, vec![Vec::new(); arch.neutral_loci.len()]));
+                .or_insert_with(|| (0.0, vec![Pool::default(); arch.neutral_loci.len()]));
             p.0 += 1.0;
             for (k, &l) in arch.neutral_loci.iter().enumerate() {
                 for h in &a.genome.hap {
@@ -188,7 +202,7 @@ impl Simulation {
         let mu = self.mutation_rates().neutral;
         let demes = match self.mode {
             Mode::Individual => &self.frozen,
-            Mode::Population => &self.demes,
+            Mode::Population | Mode::Macro => &self.demes,
         };
         for d in demes {
             let n = d.total() as f64;
@@ -209,7 +223,7 @@ impl Simulation {
             let p = e
                 .patches
                 .entry(d.patch)
-                .or_insert_with(|| (0.0, vec![Vec::new(); arch.neutral_loci.len()]));
+                .or_insert_with(|| (0.0, vec![Pool::default(); arch.neutral_loci.len()]));
             p.0 += n;
             for (k, &l) in arch.neutral_loci.iter().enumerate() {
                 for &(x, f) in &d.freqs[l] {
@@ -240,13 +254,15 @@ impl Simulation {
             let ht = arch
                 .neutral_loci
                 .iter()
-                .map(|&l| expected_het(&e.total[l], e.n))
+                .map(|&l| expected_het(&e.total[l].v, e.n))
                 .sum::<f64>()
                 / nl;
             let hs = e
                 .patches
                 .values()
-                .map(|(n, pools)| n * pools.iter().map(|p| expected_het(p, *n)).sum::<f64>() / nl)
+                .map(|(n, pools)| {
+                    n * pools.iter().map(|p| expected_het(&p.v, *n)).sum::<f64>() / nl
+                })
                 .sum::<f64>()
                 / e.n;
             let fst = if ht > 1e-9 {
@@ -301,7 +317,7 @@ impl Simulation {
                 if live > 1 {
                     segregating += live as u32;
                 }
-                for &(x, c) in pool {
+                for &(x, c) in pool.iter() {
                     let p = c / (2.0 * e.n);
                     if (TRACK_MIN..=1.0 - TRACK_MIN).contains(&p) {
                         tracked.push((p * (1.0 - p), self.alleles.get(x).uid, p));
@@ -316,11 +332,17 @@ impl Simulation {
                 .collect();
             // Alleles tracked last time that are now rare, lost or fixed: record where they went.
             if let Some(prev) = history.and_then(|v| v.last()) {
-                for &(uid, _) in &prev.freqs {
-                    if freqs.iter().any(|x| x.0 == uid) {
-                        continue;
-                    }
-                    let p = self.allele_pool_freq(&e.total, uid, e.n);
+                let gone: Vec<u64> = prev
+                    .freqs
+                    .iter()
+                    .map(|x| x.0)
+                    .filter(|uid| !freqs.iter().any(|x| x.0 == *uid))
+                    .collect();
+                let ids = self.allele_ids(&gone);
+                for uid in gone {
+                    let p = ids
+                        .get(&uid)
+                        .map_or(0.0, |&id| self.allele_pool_freq(&e.total, id, e.n));
                     freqs.push((uid, (p * 65535.0).round() as u16));
                 }
             }
@@ -343,15 +365,27 @@ impl Simulation {
         }
     }
 
-    /// Frequency of the allele `uid` in pooled per-locus counts of `n` diploids.
-    fn allele_pool_freq(&self, total: &[Pool], uid: u64, n: f64) -> f64 {
-        let Some(id) = self.alleles.alleles.iter().position(|a| a.uid == uid) else {
-            return 0.0;
-        };
-        let locus = self.alleles.get(id as u32).locus as usize;
+    /// Table index of each of `uids` still in the allele table (the first, if several).
+    fn allele_ids(&self, uids: &[u64]) -> std::collections::HashMap<u64, u32> {
+        let mut out = std::collections::HashMap::new();
+        if uids.is_empty() {
+            return out;
+        }
+        let want: std::collections::HashSet<u64> = uids.iter().copied().collect();
+        for (id, a) in self.alleles.alleles.iter().enumerate() {
+            if want.contains(&a.uid) {
+                out.entry(a.uid).or_insert(id as u32);
+            }
+        }
+        out
+    }
+
+    /// Frequency of allele `id` in pooled per-locus counts of `n` diploids.
+    fn allele_pool_freq(&self, total: &[Pool], id: u32, n: f64) -> f64 {
+        let locus = self.alleles.get(id).locus as usize;
         total
             .get(locus)
-            .and_then(|p| p.iter().find(|x| x.0 == id as u32))
+            .and_then(|p| p.at.get(&id).map(|&i| p.v[i]))
             .map_or(0.0, |x| (x.1 / (2.0 * n)).min(1.0))
     }
 }
@@ -384,7 +418,7 @@ mod tests {
     #[test]
     fn expected_het_is_unbiased_for_two_copies() {
         // One heterozygote: 2/(2−1) · (1 − 0.5) = 1.
-        assert!((expected_het(&vec![(0, 1.0), (1, 1.0)], 1.0) - 1.0).abs() < 1e-12);
-        assert_eq!(expected_het(&vec![(0, 2.0)], 1.0), 0.0);
+        assert!((expected_het(&[(0, 1.0), (1, 1.0)], 1.0) - 1.0).abs() < 1e-12);
+        assert_eq!(expected_het(&[(0, 2.0)], 1.0), 0.0);
     }
 }

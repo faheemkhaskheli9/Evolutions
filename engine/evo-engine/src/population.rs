@@ -145,7 +145,12 @@ impl Deme {
 
 /// Weighted merge of two allele-frequency pools sorted by allele id: `a` becomes
 /// `wa·a + (1 − wa)·b`. `scratch` is reused between calls so merging rarely allocates.
-fn merge_sorted(a: &mut Vec<(u32, f32)>, b: &[(u32, f32)], wa: f32, scratch: &mut Vec<(u32, f32)>) {
+pub(crate) fn merge_sorted(
+    a: &mut Vec<(u32, f32)>,
+    b: &[(u32, f32)],
+    wa: f32,
+    scratch: &mut Vec<(u32, f32)>,
+) {
     let wb = 1.0 - wa;
     // Common case: both pools carry the same alleles.
     if a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0) {
@@ -188,15 +193,15 @@ pub(crate) struct PatchCache {
 /// Climate and resources of one patch.
 #[derive(Clone, Default)]
 pub(crate) struct PatchCtx {
-    land: Vec<usize>,
+    pub(crate) land: Vec<usize>,
     temp_month: [f32; 12],
     diurnal: f32,
     water_access: f32,
     luminance: f32,
     cover: f32,
     /// Sustainable offtake of high-quality and coarse forage, g / yr.
-    plant_supply_g: f32,
-    rough_supply_g: f32,
+    pub(crate) plant_supply_g: f32,
+    pub(crate) rough_supply_g: f32,
     /// Land connectivity to each of the 8 neighbouring patches (index (dy+1)*3+(dx+1)):
     /// the fraction of border tiles where land touches land. Water and the poles block
     /// dispersal; only rare rafting crosses them.
@@ -205,8 +210,8 @@ pub(crate) struct PatchCtx {
 
 /// Ecological context of one deme for the year.
 #[derive(Clone, Copy, Default)]
-struct Eco {
-    food_ratio: f32,
+pub(crate) struct Eco {
+    pub(crate) food_ratio: f32,
     pred_hazard: f32,
     mean_catch: f32,
     mean_plant_eff: f32,
@@ -268,21 +273,21 @@ fn catchability(p: &Phenotype, d: &Derived, lum: f32) -> f32 {
 
 /// Annual vital rates of a phenotype in a patch (shared physiology, TRD TR-MP2).
 /// `d` is `derive(p, adult mass)`.
-fn annual(p: &Phenotype, d: &Derived, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
+pub(crate) fn annual(p: &Phenotype, d: &Derived, pc: &PatchCtx, eco: &Eco, bg: f32) -> Annual {
     annual_heat(p, d, &year_heat(d, pc), pc, eco, bg)
 }
 
 /// A year's heat balance of an adult: energy for thermoregulation, evaporative water
 /// loss and heat/cold stress. Reads only the fields set by `derive_thermal`.
 #[derive(Clone, Copy)]
-struct YearHeat {
+pub(crate) struct YearHeat {
     need: f32,
     evap_g: f32,
     heat_s: f32,
     cold_s: f32,
 }
 
-fn year_heat(d: &Derived, pc: &PatchCtx) -> YearHeat {
+pub(crate) fn year_heat(d: &Derived, pc: &PatchCtx) -> YearHeat {
     let mut y = YearHeat {
         need: 0.0,
         evap_g: 0.0,
@@ -302,7 +307,7 @@ fn year_heat(d: &Derived, pc: &PatchCtx) -> YearHeat {
 }
 
 /// `annual` with the adult's heat balance `yh = year_heat(d, pc)` already worked out.
-fn annual_heat(
+pub(crate) fn annual_heat(
     p: &Phenotype,
     d: &Derived,
     yh: &YearHeat,
@@ -391,7 +396,7 @@ fn annual_heat(
 
 /// Traits that `fitness` does not read (their own value; deme means enter through
 /// `Eco`). Their selection gradient is exactly zero, so it is not computed.
-const FITNESS_NEUTRAL: [Trait; 5] = [
+pub(crate) const FITNESS_NEUTRAL: [Trait; 5] = [
     Trait::Boldness,
     Trait::Sociality,
     Trait::Preference,
@@ -429,8 +434,8 @@ fn fitness(
 
 /// `fitness` and the pieces it is made of, for splitting the selection gradient
 /// into the hazards and reproduction behind it (PRD FR-O8).
-struct FitParts {
-    w: f32,
+pub(crate) struct FitParts {
+    pub(crate) w: f32,
     /// Survival over the year.
     s: f32,
     /// Hazards: starvation, dehydration, predation, heat, cold, ageing.
@@ -442,7 +447,7 @@ struct FitParts {
     birth_heat: f32,
 }
 
-fn fitness_parts(
+pub(crate) fn fitness_parts(
     p: &Phenotype,
     pc: &PatchCtx,
     eco: &Eco,
@@ -490,9 +495,445 @@ pub struct DemeSelection {
     pub drivers: [[f32; crate::explain::N_DRIVERS]; N_TRAITS],
 }
 
+/// One unit of the ecology: a deme (or, in Macro mode, a projected deme) of `n`
+/// animals of genome architecture `arch` in `patch`.
+pub(crate) struct Unit {
+    pub patch: u32,
+    pub arch: u16,
+    pub n: f32,
+}
+
+/// Ecological context of every unit for the year: plant demand vs supply and
+/// predation (Holling type II), per patch. `base_need` and `base_fec` are each unit's
+/// energy need and fecundity when fed to capacity.
+pub(crate) fn ecology(
+    units: &[Unit],
+    means: &[Phenotype],
+    derived: &[Derived],
+    base_need: &[f32],
+    base_fec: &[f32],
+    ctxs: &[PatchCtx],
+    kj_g: f32,
+) -> Vec<Eco> {
+    let mut by_patch: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for (k, u) in units.iter().enumerate() {
+        by_patch.entry(u.patch).or_default().push(k);
+    }
+    let mut eco = vec![Eco::default(); units.len()];
+    let kill_kj = |prey: &Derived, m: f32| -> f32 {
+        let _ = prey;
+        m * 1000.0 * 0.6 * 7.0
+    };
+    for (&patch, ks) in &by_patch {
+        let pc = &ctxs[patch as usize];
+        // Plant food: everyone wants high-quality forage first; what is left over is
+        // sought in coarse forage by those whose guts can digest it (Jarman–Bell).
+        let mut demand_hq = 0.0;
+        let mut eff_sum = 0.0;
+        let mut eff_n = 0.0;
+        let mut need_kj_plant = vec![0f32; ks.len()];
+        for (x, &k) in ks.iter().enumerate() {
+            let dd = &derived[k];
+            let share = dd.plant_eff / (dd.plant_eff + dd.meat_eff).max(1e-3);
+            if dd.meat_eff < 0.3 || share > 0.3 {
+                let n = units[k].n;
+                need_kj_plant[x] = n * base_need[k] * if dd.meat_eff >= 0.3 { share } else { 1.0 };
+                demand_hq += need_kj_plant[x] / (kj_g * dd.plant_eff.max(0.01));
+                eff_sum += n * dd.plant_eff;
+                eff_n += n;
+            }
+        }
+        let ratio_hq = if demand_hq > 0.0 {
+            (pc.plant_supply_g / demand_hq).min(1.0)
+        } else {
+            1.0
+        };
+        // Coarse forage goes preferentially to guts that digest it (competitive weight q).
+        let mut weighted_lq = 0.0;
+        for (x, &k) in ks.iter().enumerate() {
+            let q = roughage_quality(means[k].get(Trait::BodyMass));
+            if q > 0.1 {
+                weighted_lq += q * need_kj_plant[x] * (1.0 - ratio_hq)
+                    / (kj_g * derived[k].plant_eff.max(0.01) * q);
+            }
+        }
+        let surplus = if demand_hq > 0.0 {
+            (pc.plant_supply_g / demand_hq).clamp(1.0, 1.5)
+        } else {
+            1.5
+        };
+        let plant_ratio_of = |k: usize| -> f32 {
+            let q = roughage_quality(means[k].get(Trait::BodyMass));
+            let ratio_lq = if q <= 0.1 {
+                0.0
+            } else if weighted_lq > 0.0 {
+                (pc.rough_supply_g * q / weighted_lq).min(1.5)
+            } else {
+                1.5
+            };
+            if ratio_hq >= 1.0 {
+                surplus.max(ratio_lq)
+            } else {
+                ratio_hq + (1.0 - ratio_hq) * ratio_lq.min(1.0)
+            }
+        };
+        // Predation, in two passes: predators request kills (type III functional
+        // response), then each prey deme can lose at most what is outside refuges.
+        // "Doomed surplus" (Errington 1946): mostly young, old and weak animals are
+        // taken, so the yearly loss a prey deme can suffer scales with its
+        // reproductive output; cover shelters part of it.
+        let cap_of = |j: usize| -> f32 {
+            // Prey share the patch, so their fed-to-capacity fecundity is `base_fec`.
+            let fec = base_fec[j];
+            let vulnerable = (0.08 + 0.3 * fec).clamp(0.08, 0.7) * (1.0 - 0.4 * pc.cover);
+            vulnerable * units[j].n
+        };
+        let mut requests: Vec<(usize, usize, f32, f32)> = vec![]; // (predator, prey, kills, need_kills)
+        for &k in ks {
+            let pd = &derived[k];
+            if pd.meat_eff < 0.3 {
+                continue;
+            }
+            let pm = means[k].get(Trait::BodyMass);
+            let npred = units[k].n;
+            let prey: Vec<(usize, f32)> = ks
+                .iter()
+                .filter(|&&j| j != k && units[j].arch != units[k].arch)
+                .filter(|&&j| {
+                    let m = means[j].get(Trait::BodyMass);
+                    m < 2.0 * pm * (1.0 + 0.4 * means[k].get(Trait::Sociality) * 3.0)
+                        && m > 0.005 * pm
+                })
+                // Some prey are always out of reach (refuges in cover).
+                .map(|&j| {
+                    let refuge = 0.1 + 0.4 * pc.cover;
+                    (
+                        j,
+                        units[j].n
+                            * (1.0 - refuge)
+                            * catchability(&means[j], &derived[j], pc.luminance),
+                    )
+                })
+                .collect();
+            // Work in energy: catchable prey energy per predator vs. energy needed.
+            let avail_kj: f32 = prey
+                .iter()
+                .map(|&(j, w)| w * kill_kj(&derived[j], means[j].get(Trait::BodyMass)))
+                .sum();
+            if avail_kj <= 0.0 {
+                continue;
+            }
+            // Omnivores only hunt for the meat part of their diet.
+            let meat_share = pd.meat_eff / (pd.plant_eff + pd.meat_eff).max(1e-3);
+            let need_kj = base_need[k] * meat_share / pd.meat_eff.max(0.05);
+            let attack = (pd.vmax_kmh / 40.0).clamp(0.3, 3.0) * (0.5 + means[k].get(Trait::Senses));
+            // Ratio-dependent (Arditi & Ginzburg 1989), sigmoid (type III) response:
+            // intake depends on catchable prey energy per predator, so the result does
+            // not depend on tile size, and hunting eases off when prey are scarce.
+            let ratio = avail_kj / npred.max(1.0);
+            let half = 0.4 * need_kj / attack;
+            // Satiation: predators kill little beyond their needs.
+            let intake_kj = 1.1 * need_kj * ratio * ratio / (ratio * ratio + half * half);
+            for &(j, w) in &prey {
+                let kj = kill_kj(&derived[j], means[j].get(Trait::BodyMass));
+                let share = w * kj / avail_kj;
+                // (predator, prey, kills of this prey, predator need in kills-equivalent)
+                requests.push((k, j, intake_kj * npred * share / kj, need_kj * npred / kj));
+            }
+        }
+        let mut asked: BTreeMap<usize, f32> = BTreeMap::new();
+        for &(_, j, kills, _) in &requests {
+            *asked.entry(j).or_default() += kills;
+        }
+        // Each hunted deme's cap, worked out once rather than once per predator.
+        let scale_of: BTreeMap<usize, f32> = asked
+            .iter()
+            .map(|(&j, &a)| (j, (cap_of(j) / a.max(1e-6)).min(1.0)))
+            .collect();
+        let mut kills_on: BTreeMap<usize, f32> = BTreeMap::new();
+        let mut got: BTreeMap<usize, (f32, f32)> = BTreeMap::new();
+        for &(k, j, kills, need_eq) in &requests {
+            let scale = scale_of[&j];
+            *kills_on.entry(j).or_default() += kills * scale;
+            let kj = kill_kj(&derived[j], means[j].get(Trait::BodyMass));
+            let e = got.entry(k).or_insert((0.0, need_eq * kj));
+            e.0 += kills * scale * kj;
+        }
+        // Carrion: a share of animals dying of other causes is found by scavengers.
+        let carrion_kj: f32 = ks
+            .iter()
+            .filter(|&&j| derived[j].meat_eff < 0.3)
+            .map(|&j| units[j].n * 0.3 * 0.25 * kill_kj(&derived[j], means[j].get(Trait::BodyMass)))
+            .sum();
+        let scavenger_need: f32 = ks
+            .iter()
+            .filter(|&&k| derived[k].meat_eff >= 0.3)
+            .map(|&k| units[k].n * base_need[k] / derived[k].meat_eff.max(0.05))
+            .sum();
+        let carrion_ratio = if scavenger_need > 0.0 {
+            (carrion_kj / scavenger_need).min(0.5)
+        } else {
+            0.0
+        };
+        for &k in ks {
+            let n = units[k].n;
+            let dd = &derived[k];
+            let hunted = got
+                .get(&k)
+                .map(|&(g, need)| g / need.max(1e-6))
+                .unwrap_or(0.0);
+            let meat_ratio = if dd.meat_eff >= 0.3 {
+                (hunted + carrion_ratio).min(1.5)
+            } else {
+                0.0
+            };
+            let plant = plant_ratio_of(k).min(1.5);
+            let food = if dd.meat_eff >= 0.3 {
+                // Omnivores mix sources, or fall back on one at its own efficiency.
+                let best = dd.plant_eff.max(dd.meat_eff);
+                let share = dd.plant_eff / (dd.plant_eff + dd.meat_eff).max(1e-3);
+                (share * plant + (1.0 - share) * meat_ratio)
+                    .max(plant * dd.plant_eff / best)
+                    .max(meat_ratio * dd.meat_eff / best)
+            } else {
+                plant
+            };
+            let kills = kills_on.get(&k).copied().unwrap_or(0.0);
+            let catch = catchability(&means[k], dd, pc.luminance);
+            let pref = means[k].get(Trait::Preference);
+            let choosy = means[k].get(Trait::Choosiness);
+            eco[k] = Eco {
+                food_ratio: food,
+                pred_hazard: if n > 0.0 {
+                    -(1.0 - kills / n).max(0.01).ln()
+                } else {
+                    0.0
+                },
+                mean_catch: catch,
+                mean_plant_eff: if eff_n > 0.0 {
+                    eff_sum / eff_n
+                } else {
+                    dd.plant_eff
+                },
+                mean_pref: pref,
+                mean_choosy: choosy,
+                mean_acc: mate_acceptance(pref, choosy, means[k].get(Trait::Ornament)),
+                mean_supply: dd.max_intake_kj_day * 365.25 / base_need[k].max(1.0),
+            };
+        }
+    }
+    eco
+}
+
+/// Selection gradient of a deme: per latent trait, β = d ln w / dz (capped), its split
+/// into drivers (`crate::explain::DRIVERS`), and ln w at z ± 0.05 (Macro mode reads
+/// the curvature from these).
+pub(crate) struct Gradient {
+    pub beta: [f32; N_TRAITS],
+    pub drivers: [[f32; crate::explain::N_DRIVERS]; N_TRAITS],
+    pub lnw: [(f32, f32); N_TRAITS],
+}
+
+/// Step of the latent trait used for the selection gradient.
+pub(crate) const GRADIENT_DELTA: f32 = 0.05;
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gradient(
+    mean: &Phenotype,
+    latent: &[f32; N_TRAITS],
+    pc: &PatchCtx,
+    e: &Eco,
+    bg: f32,
+    fec: f32,
+    base_heat: &YearHeat,
+    base_mass: &MassTerms,
+) -> Gradient {
+    let mut lnw = [(0f32, 0f32); N_TRAITS];
+    let delta = GRADIENT_DELTA;
+    let mut beta = [0f32; N_TRAITS];
+    let mut drivers = [[0f32; crate::explain::N_DRIVERS]; N_TRAITS];
+    for (t, b) in beta.iter_mut().enumerate() {
+        let trait_t = Trait::from_index(t);
+        if FITNESS_NEUTRAL.contains(&trait_t) {
+            continue;
+        }
+        // The mean phenotype with trait t moved up or down (the other traits'
+        // transforms are unchanged, so they are not recomputed).
+        let mut hi = *mean;
+        let mut lo = *mean;
+        hi.0[t] = trait_t.to_phenotype(latent[t] + delta);
+        lo.0[t] = trait_t.to_phenotype(latent[t] - delta);
+        let heat = HEAT_NEUTRAL.contains(&trait_t).then_some(base_heat);
+        let mass = (trait_t != Trait::BodyMass).then_some(base_mass);
+
+        let fh = fitness_parts(&hi, pc, e, bg, fec, mass, heat);
+        let fl = fitness_parts(&lo, pc, e, bg, fec, mass, heat);
+        let (wh, wl) = (fh.w, fl.w);
+        lnw[t] = (wh.ln(), wl.ln());
+        // Gradients per latent unit, capped at strengths seen in nature
+        // (|β| ≲ 0.5 per phenotypic SD; Kingsolver et al. 2001).
+        *b = ((wh.ln() - wl.ln()) / (2.0 * delta)).clamp(-1.0, 1.0);
+        // d ln w = (ds + 0.25·dR) / w, with ds = −s·dH: each hazard's and
+        // reproduction's share of the gradient. Young survive at
+        // exp(−(H/2 + birth stress)), so the hazards and newborns' heat and cold
+        // stress also act through reproduction; what is left is reproduction.
+        let (s_mid, w_mid) = (0.5 * (fh.s + fl.s), 0.5 * (wh + wl));
+        let fec_mid = 0.5 * (fh.fecundity + fl.fecundity);
+        let scale = 1.0 / (2.0 * delta) / w_mid;
+        let dr = &mut drivers[t];
+        let mut via_young = 0.0;
+        for h in 0..6 {
+            let dh = fh.hazards[h] - fl.hazards[h];
+            let young = if h < 5 {
+                -0.25 * fec_mid * 0.5 * dh
+            } else {
+                0.0
+            };
+            via_young += young;
+            dr[h] = (-s_mid * dh + young) * scale;
+        }
+        let cold = -0.25 * fec_mid * (fh.birth_cold - fl.birth_cold);
+        let heat = -0.25 * fec_mid * (fh.birth_heat - fl.birth_heat);
+        dr[4] += cold * scale;
+        dr[3] += heat * scale;
+        dr[6] = (0.25 * (fh.repro - fl.repro) - via_young - cold - heat) * scale;
+    }
+    Gradient { beta, drivers, lnw }
+}
+
+/// Selection against incompatible combinations within a deme over `years` years.
+/// Alleles rarer than 0.5% are ignored (they almost never meet a partner).
+pub(crate) fn select_dmi(
+    deme: &mut Deme,
+    arch: &GenomeArch,
+    alleles: &AlleleTable,
+    seed: u64,
+    dmi_p: f64,
+    dmi_s: f64,
+    years: f32,
+) {
+    let common: Vec<(usize, u32, f32, u64)> = arch
+        .dmi_loci
+        .iter()
+        .flat_map(|&l| deme.freqs[l].iter().map(move |&(a, p)| (l, a, p)))
+        .filter(|&(_, a, p)| p > 0.005 && alleles.get(a).derived)
+        .map(|(l, a, p)| (l, a, p, alleles.get(a).uid))
+        .collect();
+    if common.len() < 2 {
+        return;
+    }
+    for &(l, a, _, ua) in &common {
+        let cost: f32 = common
+            .iter()
+            .filter(|&&(lb, _, _, ub)| lb != l && incompatible(seed, ua, ub, dmi_p))
+            .map(|&(_, _, q, _)| 2.0 * q * dmi_s as f32)
+            .sum();
+        if cost > 0.0 {
+            let pool = &mut deme.freqs[l];
+            if let Some(x) = pool.iter_mut().find(|x| x.0 == a) {
+                let keep = (1.0 - cost).max(0.0);
+                x.1 *= if years == 1.0 { keep } else { keep.powf(years) };
+            }
+            normalise(pool);
+        }
+    }
+}
+
+/// Fraction of a deme that emigrates in a year: more for good dispersers and for
+/// hungry demes (density-dependent emigration).
+pub(crate) fn emigration_rate(m: &Phenotype, food_ratio: f32, patch_km: f32) -> f32 {
+    let disp_km = (5.0 + 80.0 * m.get(Trait::Dispersal)) * m.get(Trait::BodyMass).powf(0.25);
+    let hunger = (1.0 - food_ratio).max(0.0);
+    ((disp_km / patch_km).clamp(0.0, 0.5) * 0.5 + 0.5 * hunger).min(0.6)
+}
+
+/// Neighbouring patches that dispersers from `patch` can reach over land, with the
+/// land connectivity of each border as its weight.
+pub(crate) fn neighbour_patches(
+    ctxs: &[PatchCtx],
+    patch: u32,
+    pw: i64,
+    ph: i64,
+) -> (Vec<u32>, Vec<f64>) {
+    let (px, py) = (patch as i64 % pw, patch as i64 / pw);
+    let mut targets = vec![];
+    let mut weights = vec![];
+    let here = &ctxs[patch as usize];
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let ny = py + dy;
+            if ny < 0 || ny >= ph {
+                continue;
+            }
+            let nx = (px + dx).rem_euclid(pw);
+            let t = (ny * pw + nx) as usize;
+            let c = here.conn[((dy + 1) * 3 + dx + 1) as usize];
+            if c > 0.0 && ctxs[t].plant_supply_g + ctxs[t].rough_supply_g > 0.0 {
+                targets.push(t as u32);
+                weights.push(c as f64);
+            }
+        }
+    }
+    (targets, weights)
+}
+
+/// Energy need and fecundity of a phenotype in a patch when fed to capacity, with no
+/// predators: the baseline the ecology compares food supply with.
+pub(crate) fn fed_rates(p: &Phenotype, d: &Derived, pc: &PatchCtx, bg: f32) -> (f32, f32) {
+    fed_rates_heat(p, d, &year_heat(d, pc), pc, bg)
+}
+
+/// `e` for a deme whose mean phenotype has become `pm` (derived `dm`, energy need
+/// `need` when fed): the population-mean terms follow the new mean, food and predation
+/// pressure stay as they are. `d0` is the derived phenotype `e` was worked out for.
+pub(crate) fn eco_for_mean(
+    e: &Eco,
+    pm: &Phenotype,
+    dm: &Derived,
+    d0: &Derived,
+    pc: &PatchCtx,
+    need: f32,
+) -> Eco {
+    Eco {
+        mean_catch: catchability(pm, dm, pc.luminance),
+        mean_plant_eff: e.mean_plant_eff * dm.plant_eff / d0.plant_eff.max(1e-6),
+        mean_pref: pm.get(Trait::Preference),
+        mean_choosy: pm.get(Trait::Choosiness),
+        mean_acc: mate_acceptance(
+            pm.get(Trait::Preference),
+            pm.get(Trait::Choosiness),
+            pm.get(Trait::Ornament),
+        ),
+        mean_supply: dm.max_intake_kj_day * 365.25 / need.max(1.0),
+        ..*e
+    }
+}
+
+/// Energy need and fecundity when fed to capacity, as `fed_rates`, from a known heat
+/// balance.
+pub(crate) fn fed_rates_heat(
+    p: &Phenotype,
+    d: &Derived,
+    yh: &YearHeat,
+    pc: &PatchCtx,
+    bg: f32,
+) -> (f32, f32) {
+    let probe = Eco {
+        food_ratio: 1.0,
+        mean_plant_eff: d.plant_eff,
+        mean_acc: 1.0,
+        ..Default::default()
+    };
+    let a = annual_heat(p, d, yh, pc, &probe, bg);
+    (a.need_kj, a.fecundity)
+}
+
 impl Simulation {
     /// Patch contexts, reused until the climate or the patch settings change.
-    fn patch_contexts(&mut self) -> std::sync::Arc<Vec<PatchCtx>> {
+    pub(crate) fn patch_contexts(&mut self) -> std::sync::Arc<Vec<PatchCtx>> {
         let key = (
             self.world.revision,
             self.world.global_offset.to_bits(),
@@ -579,238 +1020,23 @@ impl Simulation {
             .map(|p| derive(p, p.get(Trait::BodyMass)))
             .collect();
 
-        // Ecology per patch: plant demand vs supply, and predation (Holling type II).
-        let mut by_patch: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
-        for (k, d) in self.demes.iter().enumerate() {
-            by_patch.entry(d.patch).or_default().push(k);
-        }
-        let mut eco = vec![Eco::default(); nd];
         let mut base_need = vec![0f32; nd];
         let mut base_fec = vec![0f32; nd];
         for (k, d) in self.demes.iter().enumerate() {
-            let pc = &ctxs[d.patch as usize];
-            let probe = Eco {
-                food_ratio: 1.0,
-                mean_plant_eff: derived[k].plant_eff,
-                mean_acc: 1.0,
-                ..Default::default()
-            };
-            let a = annual(&means[k], &derived[k], pc, &probe, bg);
-            base_need[k] = a.need_kj;
-            base_fec[k] = a.fecundity;
+            (base_need[k], base_fec[k]) =
+                fed_rates(&means[k], &derived[k], &ctxs[d.patch as usize], bg);
         }
+        let units: Vec<Unit> = self
+            .demes
+            .iter()
+            .map(|d| Unit {
+                patch: d.patch,
+                arch: d.arch,
+                n: d.total() as f32,
+            })
+            .collect();
         let kj_g = self.params.forage_kj_per_g as f32;
-        let kill_kj = |prey: &Derived, m: f32| -> f32 {
-            let _ = prey;
-            m * 1000.0 * 0.6 * 7.0
-        };
-        for (&patch, ks) in &by_patch {
-            let pc = &ctxs[patch as usize];
-            // Plant food: everyone wants high-quality forage first; what is left over is
-            // sought in coarse forage by those whose guts can digest it (Jarman–Bell).
-            let mut demand_hq = 0.0;
-            let mut eff_sum = 0.0;
-            let mut eff_n = 0.0;
-            let mut need_kj_plant = vec![0f32; ks.len()];
-            for (x, &k) in ks.iter().enumerate() {
-                let dd = &derived[k];
-                let share = dd.plant_eff / (dd.plant_eff + dd.meat_eff).max(1e-3);
-                if dd.meat_eff < 0.3 || share > 0.3 {
-                    let n = self.demes[k].total() as f32;
-                    need_kj_plant[x] =
-                        n * base_need[k] * if dd.meat_eff >= 0.3 { share } else { 1.0 };
-                    demand_hq += need_kj_plant[x] / (kj_g * dd.plant_eff.max(0.01));
-                    eff_sum += n * dd.plant_eff;
-                    eff_n += n;
-                }
-            }
-            let ratio_hq = if demand_hq > 0.0 {
-                (pc.plant_supply_g / demand_hq).min(1.0)
-            } else {
-                1.0
-            };
-            // Coarse forage goes preferentially to guts that digest it (competitive weight q).
-            let mut weighted_lq = 0.0;
-            for (x, &k) in ks.iter().enumerate() {
-                let q = roughage_quality(means[k].get(Trait::BodyMass));
-                if q > 0.1 {
-                    weighted_lq += q * need_kj_plant[x] * (1.0 - ratio_hq)
-                        / (kj_g * derived[k].plant_eff.max(0.01) * q);
-                }
-            }
-            let surplus = if demand_hq > 0.0 {
-                (pc.plant_supply_g / demand_hq).clamp(1.0, 1.5)
-            } else {
-                1.5
-            };
-            let plant_ratio_of = |k: usize| -> f32 {
-                let q = roughage_quality(means[k].get(Trait::BodyMass));
-                let ratio_lq = if q <= 0.1 {
-                    0.0
-                } else if weighted_lq > 0.0 {
-                    (pc.rough_supply_g * q / weighted_lq).min(1.5)
-                } else {
-                    1.5
-                };
-                if ratio_hq >= 1.0 {
-                    surplus.max(ratio_lq)
-                } else {
-                    ratio_hq + (1.0 - ratio_hq) * ratio_lq.min(1.0)
-                }
-            };
-            // Predation, in two passes: predators request kills (type III functional
-            // response), then each prey deme can lose at most what is outside refuges.
-            // "Doomed surplus" (Errington 1946): mostly young, old and weak animals are
-            // taken, so the yearly loss a prey deme can suffer scales with its
-            // reproductive output; cover shelters part of it.
-            let cap_of = |j: usize| -> f32 {
-                // Prey share the patch, so their fed-to-capacity fecundity is `base_fec`.
-                let fec = base_fec[j];
-                let vulnerable = (0.08 + 0.3 * fec).clamp(0.08, 0.7) * (1.0 - 0.4 * pc.cover);
-                vulnerable * self.demes[j].total() as f32
-            };
-            let mut requests: Vec<(usize, usize, f32, f32)> = vec![]; // (predator, prey, kills, need_kills)
-            for &k in ks {
-                let pd = &derived[k];
-                if pd.meat_eff < 0.3 {
-                    continue;
-                }
-                let pm = means[k].get(Trait::BodyMass);
-                let npred = self.demes[k].total() as f32;
-                let prey: Vec<(usize, f32)> = ks
-                    .iter()
-                    .filter(|&&j| j != k && self.demes[j].arch != self.demes[k].arch)
-                    .filter(|&&j| {
-                        let m = means[j].get(Trait::BodyMass);
-                        m < 2.0 * pm * (1.0 + 0.4 * means[k].get(Trait::Sociality) * 3.0)
-                            && m > 0.005 * pm
-                    })
-                    // Some prey are always out of reach (refuges in cover).
-                    .map(|&j| {
-                        let refuge = 0.1 + 0.4 * pc.cover;
-                        (
-                            j,
-                            self.demes[j].total() as f32
-                                * (1.0 - refuge)
-                                * catchability(&means[j], &derived[j], pc.luminance),
-                        )
-                    })
-                    .collect();
-                // Work in energy: catchable prey energy per predator vs. energy needed.
-                let avail_kj: f32 = prey
-                    .iter()
-                    .map(|&(j, w)| w * kill_kj(&derived[j], means[j].get(Trait::BodyMass)))
-                    .sum();
-                if avail_kj <= 0.0 {
-                    continue;
-                }
-                // Omnivores only hunt for the meat part of their diet.
-                let meat_share = pd.meat_eff / (pd.plant_eff + pd.meat_eff).max(1e-3);
-                let need_kj = base_need[k] * meat_share / pd.meat_eff.max(0.05);
-                let attack =
-                    (pd.vmax_kmh / 40.0).clamp(0.3, 3.0) * (0.5 + means[k].get(Trait::Senses));
-                // Ratio-dependent (Arditi & Ginzburg 1989), sigmoid (type III) response:
-                // intake depends on catchable prey energy per predator, so the result does
-                // not depend on tile size, and hunting eases off when prey are scarce.
-                let ratio = avail_kj / npred.max(1.0);
-                let half = 0.4 * need_kj / attack;
-                // Satiation: predators kill little beyond their needs.
-                let intake_kj = 1.1 * need_kj * ratio * ratio / (ratio * ratio + half * half);
-                for &(j, w) in &prey {
-                    let kj = kill_kj(&derived[j], means[j].get(Trait::BodyMass));
-                    let share = w * kj / avail_kj;
-                    // (predator, prey, kills of this prey, predator need in kills-equivalent)
-                    requests.push((k, j, intake_kj * npred * share / kj, need_kj * npred / kj));
-                }
-            }
-            let mut asked: BTreeMap<usize, f32> = BTreeMap::new();
-            for &(_, j, kills, _) in &requests {
-                *asked.entry(j).or_default() += kills;
-            }
-            // Each hunted deme's cap, worked out once rather than once per predator.
-            let scale_of: BTreeMap<usize, f32> = asked
-                .iter()
-                .map(|(&j, &a)| (j, (cap_of(j) / a.max(1e-6)).min(1.0)))
-                .collect();
-            let mut kills_on: BTreeMap<usize, f32> = BTreeMap::new();
-            let mut got: BTreeMap<usize, (f32, f32)> = BTreeMap::new();
-            for &(k, j, kills, need_eq) in &requests {
-                let scale = scale_of[&j];
-                *kills_on.entry(j).or_default() += kills * scale;
-                let kj = kill_kj(&derived[j], means[j].get(Trait::BodyMass));
-                let e = got.entry(k).or_insert((0.0, need_eq * kj));
-                e.0 += kills * scale * kj;
-            }
-            // Carrion: a share of animals dying of other causes is found by scavengers.
-            let carrion_kj: f32 = ks
-                .iter()
-                .filter(|&&j| derived[j].meat_eff < 0.3)
-                .map(|&j| {
-                    self.demes[j].total() as f32
-                        * 0.3
-                        * 0.25
-                        * kill_kj(&derived[j], means[j].get(Trait::BodyMass))
-                })
-                .sum();
-            let scavenger_need: f32 = ks
-                .iter()
-                .filter(|&&k| derived[k].meat_eff >= 0.3)
-                .map(|&k| {
-                    self.demes[k].total() as f32 * base_need[k] / derived[k].meat_eff.max(0.05)
-                })
-                .sum();
-            let carrion_ratio = if scavenger_need > 0.0 {
-                (carrion_kj / scavenger_need).min(0.5)
-            } else {
-                0.0
-            };
-            for &k in ks {
-                let n = self.demes[k].total() as f32;
-                let dd = &derived[k];
-                let hunted = got
-                    .get(&k)
-                    .map(|&(g, need)| g / need.max(1e-6))
-                    .unwrap_or(0.0);
-                let meat_ratio = if dd.meat_eff >= 0.3 {
-                    (hunted + carrion_ratio).min(1.5)
-                } else {
-                    0.0
-                };
-                let plant = plant_ratio_of(k).min(1.5);
-                let food = if dd.meat_eff >= 0.3 {
-                    // Omnivores mix sources, or fall back on one at its own efficiency.
-                    let best = dd.plant_eff.max(dd.meat_eff);
-                    let share = dd.plant_eff / (dd.plant_eff + dd.meat_eff).max(1e-3);
-                    (share * plant + (1.0 - share) * meat_ratio)
-                        .max(plant * dd.plant_eff / best)
-                        .max(meat_ratio * dd.meat_eff / best)
-                } else {
-                    plant
-                };
-                let kills = kills_on.get(&k).copied().unwrap_or(0.0);
-                let catch = catchability(&means[k], dd, pc.luminance);
-                let pref = means[k].get(Trait::Preference);
-                let choosy = means[k].get(Trait::Choosiness);
-                eco[k] = Eco {
-                    food_ratio: food,
-                    pred_hazard: if n > 0.0 {
-                        -(1.0 - kills / n).max(0.01).ln()
-                    } else {
-                        0.0
-                    },
-                    mean_catch: catch,
-                    mean_plant_eff: if eff_n > 0.0 {
-                        eff_sum / eff_n
-                    } else {
-                        dd.plant_eff
-                    },
-                    mean_pref: pref,
-                    mean_choosy: choosy,
-                    mean_acc: mate_acceptance(pref, choosy, means[k].get(Trait::Ornament)),
-                    mean_supply: dd.max_intake_kj_day * 365.25 / base_need[k].max(1.0),
-                };
-            }
-        }
+        let eco = ecology(&units, &means, &derived, &base_need, &base_fec, &ctxs, kj_g);
 
         let rates = self.mutation_rates();
         let seed = self.seed;
@@ -837,55 +1063,16 @@ impl Simulation {
 
             // Selection gradient on the latent scale. Allele frequencies have not changed
             // since `latents` was computed.
-            let latent = latents[k];
-            let delta = 0.05f32;
-            let mut beta = [0f32; N_TRAITS];
-            let mut drivers = [[0f32; crate::explain::N_DRIVERS]; N_TRAITS];
-            for (t, b) in beta.iter_mut().enumerate() {
-                let trait_t = Trait::from_index(t);
-                if FITNESS_NEUTRAL.contains(&trait_t) {
-                    continue;
-                }
-                // The mean phenotype with trait t moved up or down (the other traits'
-                // transforms are unchanged, so they are not recomputed).
-                let mut hi = means[k];
-                let mut lo = means[k];
-                hi.0[t] = trait_t.to_phenotype(latent[t] + delta);
-                lo.0[t] = trait_t.to_phenotype(latent[t] - delta);
-                let heat = HEAT_NEUTRAL.contains(&trait_t).then_some(&base_heat);
-                let mass = (trait_t != Trait::BodyMass).then_some(&base_mass);
-                let fec = base.fecundity;
-                let fh = fitness_parts(&hi, pc, &e, bg, fec, mass, heat);
-                let fl = fitness_parts(&lo, pc, &e, bg, fec, mass, heat);
-                let (wh, wl) = (fh.w, fl.w);
-                // Gradients per latent unit, capped at strengths seen in nature
-                // (|β| ≲ 0.5 per phenotypic SD; Kingsolver et al. 2001).
-                *b = ((wh.ln() - wl.ln()) / (2.0 * delta)).clamp(-1.0, 1.0);
-                // d ln w = (ds + 0.25·dR) / w, with ds = −s·dH: each hazard's and
-                // reproduction's share of the gradient. Young survive at
-                // exp(−(H/2 + birth stress)), so the hazards and newborns' heat and cold
-                // stress also act through reproduction; what is left is reproduction.
-                let (s_mid, w_mid) = (0.5 * (fh.s + fl.s), 0.5 * (wh + wl));
-                let fec_mid = 0.5 * (fh.fecundity + fl.fecundity);
-                let scale = 1.0 / (2.0 * delta) / w_mid;
-                let dr = &mut drivers[t];
-                let mut via_young = 0.0;
-                for h in 0..6 {
-                    let dh = fh.hazards[h] - fl.hazards[h];
-                    let young = if h < 5 {
-                        -0.25 * fec_mid * 0.5 * dh
-                    } else {
-                        0.0
-                    };
-                    via_young += young;
-                    dr[h] = (-s_mid * dh + young) * scale;
-                }
-                let cold = -0.25 * fec_mid * (fh.birth_cold - fl.birth_cold);
-                let heat = -0.25 * fec_mid * (fh.birth_heat - fl.birth_heat);
-                dr[4] += cold * scale;
-                dr[3] += heat * scale;
-                dr[6] = (0.25 * (fh.repro - fl.repro) - via_young - cold - heat) * scale;
-            }
+            let Gradient { beta, drivers, .. } = gradient(
+                &means[k],
+                &latents[k],
+                pc,
+                &e,
+                bg,
+                base.fecundity,
+                &base_heat,
+                &base_mass,
+            );
             selection.push(DemeSelection {
                 species: deme.species,
                 n: deme.total(),
@@ -914,31 +1101,8 @@ impl Simulation {
                 }
                 normalise(pool);
             }
-            // Selection against incompatible combinations within the deme. Alleles rarer
-            // than 0.5% are ignored here (they almost never meet a partner).
-            let common: Vec<(usize, u32, f32, u64)> = arch
-                .dmi_loci
-                .iter()
-                .flat_map(|&l| deme.freqs[l].iter().map(move |&(a, p)| (l, a, p)))
-                .filter(|&(_, a, p)| p > 0.005 && self.alleles.get(a).derived)
-                .map(|(l, a, p)| (l, a, p, self.alleles.get(a).uid))
-                .collect();
-            if common.len() > 1 {
-                for &(l, a, _, ua) in &common {
-                    let cost: f32 = common
-                        .iter()
-                        .filter(|&&(lb, _, _, ub)| lb != l && incompatible(seed, ua, ub, dmi_p))
-                        .map(|&(_, _, q, _)| 2.0 * q * dmi_s as f32)
-                        .sum();
-                    if cost > 0.0 {
-                        let pool = &mut deme.freqs[l];
-                        if let Some(x) = pool.iter_mut().find(|x| x.0 == a) {
-                            x.1 *= (1.0 - cost).max(0.0);
-                        }
-                        normalise(pool);
-                    }
-                }
-            }
+            // Selection against incompatible combinations within the deme.
+            select_dmi(deme, arch, &self.alleles, seed, dmi_p, dmi_s, 1.0);
             // Demography.
             let mat = base.maturity_years;
             let mut births = 0u64;
@@ -1045,34 +1209,11 @@ impl Simulation {
             }
             let mut rng = Rng::keyed(seed, tick, k as u64, stream::POPULATION ^ 0x55);
             let m = means.get(k).copied().unwrap_or(Phenotype([0.5; N_TRAITS]));
-            let disp_km =
-                (5.0 + 80.0 * m.get(Trait::Dispersal)) * m.get(Trait::BodyMass).powf(0.25);
             let patch_km = self.params.patch_size as f32 * self.world.tile_km as f32;
-            // Density-dependent emigration: hungry demes send out more dispersers.
-            let hunger = (1.0 - eco.get(k).map(|e| e.food_ratio).unwrap_or(1.0)).max(0.0);
-            let rate = ((disp_km / patch_km).clamp(0.0, 0.5) * 0.5 + 0.5 * hunger).min(0.6);
+            let food = eco.get(k).map(|e| e.food_ratio).unwrap_or(1.0);
+            let rate = emigration_rate(&m, food, patch_km);
             let (px, py) = (deme.patch as i64 % pw, deme.patch as i64 / pw);
-            let mut targets = vec![];
-            let mut weights = vec![];
-            let here = &ctxs[deme.patch as usize];
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    if dx == 0 && dy == 0 {
-                        continue;
-                    }
-                    let ny = py + dy;
-                    if ny < 0 || ny >= ph {
-                        continue;
-                    }
-                    let nx = (px + dx).rem_euclid(pw);
-                    let t = (ny * pw + nx) as usize;
-                    let c = here.conn[((dy + 1) * 3 + dx + 1) as usize];
-                    if c > 0.0 && ctxs[t].plant_supply_g + ctxs[t].rough_supply_g > 0.0 {
-                        targets.push(t as u32);
-                        weights.push(c as f64);
-                    }
-                }
-            }
+            let (targets, weights) = neighbour_patches(&ctxs, deme.patch, pw, ph);
             let open = (weights.iter().sum::<f64>() / 4.0).min(1.0);
             let emig = rng.binomial(n as u64, rate as f64 * open) as u32;
             if !targets.is_empty() && emig > 0 {
@@ -1385,7 +1526,7 @@ pub(crate) fn border_connectivity(
     }
 }
 
-fn normalise(pool: &mut [(u32, f32)]) {
+pub(crate) fn normalise(pool: &mut [(u32, f32)]) {
     let s: f32 = pool.iter().map(|x| x.1).sum();
     if s <= 0.0 {
         let n = pool.len().max(1) as f32;
@@ -1400,7 +1541,7 @@ fn normalise(pool: &mut [(u32, f32)]) {
 }
 
 /// Keeps the `max` most common alleles at a locus (ties broken by id) and renormalises.
-fn prune_rare(pool: &mut Vec<(u32, f32)>, max: usize) {
+pub(crate) fn prune_rare(pool: &mut Vec<(u32, f32)>, max: usize) {
     if pool.len() <= max {
         return;
     }

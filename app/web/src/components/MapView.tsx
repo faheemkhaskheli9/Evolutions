@@ -7,7 +7,7 @@ export type { Layer } from "./mapLayers";
 export type Tool = "inspect" | "focus" | "meteor" | "founders";
 
 export interface FrameData {
-  mode: "Individual" | "Population";
+  mode: "Individual" | "Population" | "Macro";
   focus: [number, number, number, number] | null;
   positions?: Float32Array;
   species?: Uint32Array;
@@ -101,7 +101,7 @@ export function MapView(props: MapProps) {
       // Species ranges sit on the terrain view (or are the density layer itself); climate
       // and vegetation layers are shown on their own so they stay readable.
       const rangesVisible = layer === "terrain" || layer === "population";
-      if (demeCanvas.current && rangesVisible && (f.mode === "Population" || f.focus || layer === "population")) {
+      if (demeCanvas.current && rangesVisible && (f.mode !== "Individual" || f.focus || layer === "population")) {
         ctx.drawImage(demeCanvas.current, x0, v.oy, span, world.h * v.scale);
       }
     }

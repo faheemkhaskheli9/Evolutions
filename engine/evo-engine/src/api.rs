@@ -62,7 +62,7 @@ impl Simulation {
             // Days since the start, with the time of day as the fraction.
             "days": self.minutes as f64 / self.params.day_minutes as f64,
             "hour": (self.minutes % self.params.day_minutes) / 60,
-            "mode": match self.mode { Mode::Individual => "Individual", Mode::Population => "Population" },
+            "mode": self.mode.label(),
             "focus": self.focus,
             "individuals": self.animals.len(),
             "population": self.population(),
@@ -362,7 +362,7 @@ impl Simulation {
                 }
                 self.spread_demes(&self.frozen, species, &mut out);
             }
-            Mode::Population => self.spread_demes(&self.demes, species, &mut out),
+            Mode::Population | Mode::Macro => self.spread_demes(&self.demes, species, &mut out),
         }
         out
     }
@@ -467,7 +467,7 @@ impl Simulation {
     fn counted_demes(&self) -> &[crate::population::Deme] {
         match self.mode {
             Mode::Individual => &self.frozen,
-            Mode::Population => &self.demes,
+            Mode::Population | Mode::Macro => &self.demes,
         }
     }
 

@@ -449,8 +449,27 @@ impl GenomeArch {
         year: f32,
         rng: &mut Rng,
     ) -> u32 {
-        let p = table.get(parent).clone();
-        let mut effects = p.effects;
+        let (effects, dominance) = self.mutation(table.get(parent), locus, rates, rng);
+        table.push(Allele {
+            uid: 0,
+            locus: locus as u16,
+            parent,
+            origin_year: year,
+            effects,
+            dominance,
+            derived: true,
+        })
+    }
+
+    /// Effects and dominance of a new mutation of `parent` at `locus`.
+    pub fn mutation(
+        &self,
+        parent: &Allele,
+        locus: usize,
+        rates: &MutationRates,
+        rng: &mut Rng,
+    ) -> ([(u8, f32); 2], f32) {
+        let mut effects = parent.effects;
         let mut dominance = 0.5;
         if let LocusKind::Trait(_) = self.loci[locus].kind {
             let big = if rng.chance(rates.large_effect_fraction) {
@@ -465,6 +484,18 @@ impl GenomeArch {
             }
             dominance = rng.normal_f32(0.45, 0.2).clamp(0.0, 1.0);
         }
+        (effects, dominance)
+    }
+
+    /// Adds a new allele of `parent` at `locus` with the given effects and dominance.
+    pub fn push_allele(
+        &self,
+        parent: u32,
+        locus: usize,
+        table: &mut AlleleTable,
+        year: f32,
+        (effects, dominance): ([(u8, f32); 2], f32),
+    ) -> u32 {
         table.push(Allele {
             uid: 0,
             locus: locus as u16,

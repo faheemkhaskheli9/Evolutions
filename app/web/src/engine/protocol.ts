@@ -2,7 +2,7 @@
 
 import type { CheckpointInfo } from "./checkpoints";
 
-export type ModeChoice = "Auto" | "Individual" | "Population";
+export type ModeChoice = "Auto" | "Individual" | "Population" | "Macro";
 
 export interface FounderGroup {
   species: string;
@@ -77,7 +77,7 @@ export interface Status {
   /** Days since the start, with the time of day as the fraction. */
   days: number;
   hour: number;
-  mode: "Individual" | "Population";
+  mode: "Individual" | "Population" | "Macro";
   focus: [number, number, number, number] | null;
   individuals: number;
   population: number;
