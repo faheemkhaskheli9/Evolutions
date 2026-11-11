@@ -1,6 +1,7 @@
 // Messages between the UI thread and the engine worker (System Design §7).
 
 import type { CheckpointInfo } from "./checkpoints";
+import type { BranchHistory, BranchInfo } from "./branches";
 
 export type ModeChoice = "Auto" | "Individual" | "Population" | "Macro";
 
@@ -415,6 +416,13 @@ export type ToWorker =
   | { type: "rewindBefore"; event: number }
   /** The state hash, to check that a rewound run repeats the original. */
   | { type: "hash" }
+  /** Splits a new branch off at checkpoint `from`, or at the present when it is null (PRD FR-T7). */
+  | { type: "branch"; from: number | null }
+  | { type: "switchBranch"; id: number }
+  | { type: "renameBranch"; id: number; name: string }
+  | { type: "removeBranch"; id: number }
+  /** The histories of two branches, for the comparison view. */
+  | { type: "compare"; a: number; b: number }
   /**
    * Saves a user template of new-world settings, or of the current world's creation
    * settings when `config` is absent (PRD FR-W9). `download` also offers the file.
@@ -423,6 +431,11 @@ export type ToWorker =
   /** Checks a template file and keeps it. */
   | { type: "importTemplate"; text: string; fileName: string }
   | { type: "removeTemplate"; id: string };
+
+/** One side of a branch comparison: its history, and the series of the species both branches have. */
+export interface CompareSide extends BranchHistory {
+  metrics: Record<number, Sample[]>;
+}
 
 export interface FrameMsg {
   type: "frame";
@@ -475,6 +488,9 @@ export type FromWorker =
   /** The checkpoints kept for rewind, oldest first, and their total size in bytes. */
   | { type: "checkpoints"; list: CheckpointInfo[]; bytes: number; budget: number }
   | { type: "hash"; year: number; hash: string }
+  /** The branches of the current world (PRD FR-T7). */
+  | { type: "branches"; list: BranchInfo[] }
+  | { type: "comparison"; a: CompareSide; b: CompareSide }
   | { type: "designReport"; id: number; report: DesignReport | null; error?: string }
   | { type: "notice"; message: string }
   | { type: "error"; message: string };

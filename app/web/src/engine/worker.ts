@@ -6,7 +6,8 @@ import init, { Engine, ReplayRun, check_design, check_template, make_template } 
 import { Autosaver, readAutosave, writeAutosave } from "./autosave";
 import { listTemplates, removeTemplate, storeTemplate } from "./userTemplates";
 import { CheckpointStore, compress, decompress, type CheckpointReason } from "./checkpoints";
-import { exportFiles, type DesignReport, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
+import { BranchSet, sharedSpecies } from "./branches";
+import { exportFiles, type CompareSide, type DesignReport, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
 import { smoothSpeed } from "../util";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -52,8 +53,10 @@ const MACRO_JUMP_YEARS = 20_000;
 const MACRO_STEP_YEARS = 1000;
 const AUTOSAVE_MS = 60_000;
 
-/** Checkpoints for rewind (PRD FR-T6). */
-const checkpoints = new CheckpointStore();
+/** Branches of the world's timeline (PRD FR-T7); only the active one is live. */
+const branches = new BranchSet();
+/** Checkpoints for rewind (PRD FR-T6), of the active branch. */
+let checkpoints = branches.active.store;
 /** Bumped when the history is replaced, so a checkpoint still compressing is dropped. */
 let cpGeneration = 0;
 let cpInFlight = 0;
@@ -106,14 +109,15 @@ function checkpoint(reason: CheckpointReason) {
   const events = JSON.parse(engine.status()).events as number;
   const bytes = engine.save();
   const generation = cpGeneration;
+  const store = checkpoints;
   lastCpYear = year;
   lastCpReal = performance.now();
   cpInFlight++;
   compress(bytes)
     .then((packed) => {
       if (generation !== cpGeneration) return;
-      checkpoints.add(year, events, reason, packed);
-      postCheckpoints();
+      store.add(year, events, reason, packed);
+      if (store === checkpoints) postCheckpoints();
     })
     .catch(fail)
     .finally(() => cpInFlight--);
@@ -129,9 +133,119 @@ function maybeCheckpoint() {
 /** Starts a new history: the checkpoints of the previous world no longer apply. */
 function resetCheckpoints() {
   cpGeneration++;
-  checkpoints.clear();
+  checkpoints = new CheckpointStore();
+  branches.reset(checkpoints, engine?.year() ?? 0);
   checkpoint("start");
   postCheckpoints();
+  postBranches();
+}
+
+function postBranches() {
+  if (engine) branches.active.year = engine.year();
+  post({ type: "branches", list: branches.infos() });
+}
+
+/** Keeps the live world as the active branch's head, so another branch can take its place. */
+function park() {
+  if (!engine) return;
+  const b = branches.active;
+  b.year = engine.year();
+  // Kept uncompressed: decompressing would make switching back several times slower.
+  b.head = engine.save();
+}
+
+/** Makes branch `id` the live world: its head is loaded and its checkpoints shown. */
+async function activate(id: number, message: string) {
+  const b = branches.get(id);
+  if (!b?.head) return;
+  const next = Engine.load(await decompress(b.head));
+  branches.activeId = id;
+  b.head = null;
+  checkpoints = b.store;
+  replaceEngine(next);
+  lastCpYear = b.year;
+  lastCpReal = performance.now();
+  sendCreated(false, false);
+  // Autosave a little later rather than now, so the switch itself stays quick.
+  lastAutosave = performance.now() - AUTOSAVE_MS + 5000;
+  postCheckpoints();
+  postBranches();
+  post({ type: "notice", message });
+}
+
+/**
+ * Splits a new branch off the active one, at checkpoint `from` or at the present, and
+ * switches to it. The branch it came from keeps its whole history.
+ */
+async function branchFrom(from: number | null) {
+  if (!engine || jumping || rewinding) return;
+  const cp = from === null ? undefined : checkpoints.get(from);
+  if (from !== null && !cp) return;
+  rewinding = true;
+  playing = false;
+  try {
+    if (!cp) {
+      // From the present: the live world simply carries on as the new branch.
+      const year = engine.year();
+      const parent = branches.active;
+      const b = branches.add(year, checkpoints.fork(), null);
+      park();
+      branches.activeId = b.id;
+      checkpoints = b.store;
+      checkpoint("branch");
+      postCheckpoints();
+      postBranches();
+      post({ type: "notice", message: `Started "${b.name}" in year ${Math.floor(year).toLocaleString()}; "${parent.name}" is kept as it is.` });
+    } else {
+      const b = branches.add(cp.year, checkpoints.fork(cp.id), cp.bytes);
+      park();
+      await activate(b.id, `Started "${b.name}" from year ${Math.floor(cp.year).toLocaleString()}; "${branches.get(b.parent!)!.name}" is kept as it is.`);
+    }
+  } catch (e) {
+    fail(e);
+  } finally {
+    rewinding = false;
+  }
+}
+
+async function switchBranch(id: number) {
+  if (!engine || jumping || rewinding || id === branches.activeId || !branches.get(id)) return;
+  rewinding = true;
+  playing = false;
+  try {
+    park();
+    const b = branches.get(id)!;
+    await activate(id, `Switched to "${b.name}" (year ${Math.floor(b.year).toLocaleString()}).`);
+  } catch (e) {
+    fail(e);
+  } finally {
+    rewinding = false;
+  }
+}
+
+/** A branch's history and the series of `species`; inactive branches are loaded just for this. */
+async function history(id: number): Promise<{ side: CompareSide; e: Engine; temp: boolean } | null> {
+  const b = branches.get(id);
+  if (!b || !engine) return null;
+  const temp = id !== branches.activeId;
+  const e = temp ? Engine.load(await decompress(b.head!)) : engine;
+  return { side: { id, name: b.name, year: e.year(), species: JSON.parse(e.species()), events: JSON.parse(e.events(0)), metrics: {} }, e, temp };
+}
+
+async function compare(a: number, b: number) {
+  const ha = await history(a);
+  const hb = await history(b);
+  try {
+    if (!ha || !hb) return;
+    for (const s of sharedSpecies(ha.side, hb.side)) {
+      ha.side.metrics[s.id] = JSON.parse(ha.e.metrics(s.id));
+      hb.side.metrics[s.id] = JSON.parse(hb.e.metrics(s.id));
+    }
+    post({ type: "comparison", a: ha.side, b: hb.side });
+  } finally {
+    if (ha?.temp) ha.e.free();
+    if (hb?.temp) hb.e.free();
+  }
 }
 
 /**
@@ -160,7 +274,6 @@ async function rewind(id: number) {
   }
 }
 
-/** `fresh`: a new history (a new, opened or replayed world) rather than a rewind. */
 function terrain(e: Engine) {
   return {
     world: JSON.parse(e.world_info()),
@@ -181,7 +294,8 @@ function sendTerrain() {
   sendFrame(true);
 }
 
-function sendCreated(fresh = true) {
+/** `fresh`: a new history (a new, opened or replayed world) rather than a rewind or a branch switch. `save`: autosave now (a switch of branch autosaves a little later instead). */
+function sendCreated(fresh = true, save = true) {
   if (!engine) return;
   post({ type: "created", ...terrain(engine) });
   precip = engine.layer("precip");
@@ -196,7 +310,7 @@ function sendCreated(fresh = true) {
   }
   autosaver.dirty = true;
   sendFrame(true);
-  autosave();
+  if (save) autosave();
   if (fresh) resetCheckpoints();
 }
 
@@ -656,6 +770,22 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
       }
       case "hash":
         if (engine) post({ type: "hash", year: engine.year(), hash: engine.state_hash() });
+        break;
+      case "branch":
+        void branchFrom(m.from);
+        break;
+      case "switchBranch":
+        void switchBranch(m.id);
+        break;
+      case "renameBranch":
+        branches.rename(m.id, m.name);
+        postBranches();
+        break;
+      case "removeBranch":
+        if (branches.remove(m.id)) postBranches();
+        break;
+      case "compare":
+        void compare(m.a, m.b).catch(fail);
         break;
       case "saveTemplate": {
         const text = m.config ? make_template(JSON.stringify(m.config), m.name, m.description) : engine?.user_template(m.name, m.description);

@@ -96,8 +96,9 @@ try {
     await jump100();
     const original = await hash();
     // The checkpoint taken just before that jump.
-    const marks = page.getByRole("button", { name: /^Rewind to year .* \(before a jump\)$/ });
+    const marks = page.getByRole("button", { name: /^Checkpoint, year .* \(before a jump\)$/ });
     await marks.last().click();
+    await page.getByRole("menuitem", { name: "Rewind here" }).click();
     await page.getByText(/^Rewound to year/).waitFor({ timeout: 20000 });
     const back = await hash();
     if (!(back.year < original.year - 99)) throw new Error(`rewound to year ${back.year}, ran to ${original.year}`);
@@ -212,6 +213,61 @@ try {
     await page.getByRole("button", { name: "-2 °C" }).click();
     await page.getByRole("tab", { name: /Chronicle/ }).click();
     await page.getByText(/Climate shift/).first().waitFor();
+  });
+  await step("branch timelines: same actions stay identical, an extra intervention diverges", async () => {
+    const hash = () => page.evaluate(() => window.__evoHash());
+    const jump100 = async () => {
+      const target = (await hash()).year + 100;
+      await page.getByRole("button", { name: "+100 yr" }).click();
+      for (let t = 0; (await hash()).year < target; t++) {
+        if (t > 600) throw new Error("jump did not finish");
+        await page.waitForTimeout(200);
+      }
+      await page.getByText("Fast-forwarding…").waitFor({ state: "detached", timeout: 30000 });
+    };
+    const switchTo = async (name) => {
+      const select = page.getByRole("combobox", { name: "Branch", exact: true });
+      await select.selectOption(await select.locator("option", { hasText: new RegExp(`^${name}`) }).getAttribute("value"));
+      await page.getByText(new RegExp(`^Switched to "${name}"`)).last().waitFor({ timeout: 20000 });
+    };
+    const start = await hash();
+    await page.getByRole("button", { name: "⑂ Branch" }).click();
+    await page.getByText(/^Started "Branch 2"/).waitFor({ timeout: 20000 });
+    await jump100();
+    const inBranch = await hash();
+    await switchTo("Main");
+    const back = await hash();
+    if (back.hash !== start.hash) throw new Error("switching back to Main did not restore it");
+    await jump100();
+    const inMain = await hash();
+    if (inMain.hash !== inBranch.hash) throw new Error(`same actions, different branches: ${JSON.stringify(inMain)} vs ${JSON.stringify(inBranch)}`);
+    // A third branch with one extra intervention.
+    await page.getByRole("button", { name: "⑂ Branch" }).click();
+    await page.getByText(/^Started "Branch 3"/).waitFor({ timeout: 20000 });
+    await page.getByRole("tab", { name: "World" }).click();
+    await page.getByRole("button", { name: "-2 °C" }).click();
+    await jump100();
+    const cooled = await hash();
+    await switchTo("Main");
+    await jump100();
+    const warm = await hash();
+    if (warm.year !== cooled.year || warm.hash === cooled.hash) throw new Error("the intervention made no difference");
+    // Compare Main with Branch 3.
+    await page.getByRole("button", { name: "Compare…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Compare branches" });
+    const second = dialog.getByRole("combobox", { name: "Second branch" });
+    await second.selectOption(await second.locator("option", { hasText: /^Branch 3/ }).getAttribute("value"));
+    await dialog.locator(".compare-grid svg").first().waitFor({ timeout: 20000 });
+    if ((await dialog.locator(".compare-grid svg").count()) < 2) throw new Error("expected population and trait charts");
+    await dialog.getByText(/^Split in year/).waitFor();
+    const only = await dialog.locator(".compare-grid").last().innerText();
+    if (!/Only in Branch 3[\s\S]*Climate shift/.test(only)) throw new Error(`differences: ${only}`);
+    await dialog.getByRole("button", { name: "Close" }).click();
+    // Branch from a checkpoint.
+    // Marks can crowd together; click the one wanted even if a neighbour overlaps it.
+    await page.getByRole("button", { name: /^Checkpoint, year .* \(before a jump\)$/ }).last().dispatchEvent("click");
+    await page.getByRole("menuitem", { name: "⑂ Branch from here" }).click();
+    await page.getByText(/^Started "Branch 4" from year/).waitFor({ timeout: 20000 });
   });
   await step("autosave offers to resume after a reload", async () => {
     await page.waitForTimeout(500);

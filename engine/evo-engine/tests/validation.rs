@@ -391,6 +391,67 @@ fn rewinding_to_a_checkpoint_reproduces_the_run() {
     }
 }
 
+/// Branch timelines (PRD FR-T7): branches are loads of the same checkpoint. Two branches
+/// given the same actions stay identical; a branch with one extra intervention matches
+/// the other up to that intervention and diverges only after it.
+#[test]
+fn branches_diverge_only_after_their_difference() {
+    use evo_engine::Intervention;
+    let mut trunk = blank(12);
+    trunk.run_steps(24 * 6);
+    trunk.set_mode(Mode::Population).unwrap();
+    trunk.run_years(3.0);
+    let branch_point = trunk.save_bytes().unwrap();
+    let mut a = Simulation::load_bytes(&branch_point).unwrap();
+    let mut b = Simulation::load_bytes(&branch_point).unwrap();
+    let mut c = Simulation::load_bytes(&branch_point).unwrap();
+    for s in [&mut a, &mut b, &mut c] {
+        s.run_years(3.0);
+    }
+    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.state_hash(), c.state_hash());
+    let at = c.year();
+    let events_before = c.events.len();
+    c.apply(Intervention::ClimateShift { delta_c: -4.0 })
+        .unwrap();
+    for s in [&mut a, &mut b, &mut c] {
+        s.run_years(4.0);
+    }
+    // Same actions: still identical.
+    assert_eq!(a.state_hash(), b.state_hash());
+    // One extra intervention: different afterwards…
+    assert_ne!(a.state_hash(), c.state_hash());
+    // …but the shared history up to it is the same, sample for sample and event for event.
+    let before = |s: &Simulation| -> Vec<(f64, u32, Vec<f32>)> {
+        s.metrics
+            .series
+            .values()
+            .flatten()
+            .filter(|x| x.year <= at)
+            .map(|x| (x.year, x.n, x.mean.clone()))
+            .collect()
+    };
+    assert!(!before(&a).is_empty());
+    assert_eq!(before(&a), before(&c));
+    let text = |s: &Simulation| -> Vec<String> {
+        s.events[..events_before]
+            .iter()
+            .map(|e| format!("{:?}", e))
+            .collect()
+    };
+    assert_eq!(text(&a), text(&c));
+    let after = |s: &Simulation| -> Vec<(u32, Vec<f32>)> {
+        s.metrics
+            .series
+            .values()
+            .flatten()
+            .filter(|x| x.year > at)
+            .map(|x| (x.n, x.mean.clone()))
+            .collect()
+    };
+    assert_ne!(after(&a), after(&c));
+}
+
 /// Population mode reuses patch contexts between years; a climate shift or a new
 /// habitat area must rebuild them. A save has no cache, so a loaded copy is the
 /// reference: it must continue exactly like the original after each change.

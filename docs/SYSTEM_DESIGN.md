@@ -402,6 +402,7 @@ flowchart TD
 - Checkpoints are full snapshots at log-spaced intervals (for example every 1 sim-day for the last week of real-time play, every 100 years in P, every 100 ky in M), with older ones thinned out to stay within the disk budget.
 - **Rewind** = load checkpoint + replay intervention log up to the requested tick (deterministic).
 - **Branch** = new `branch` row pointing at a checkpoint; the branch's events and metrics are stored with a `branch_id`. Comparing branches is a metrics query across branch IDs.
+- *Web app (as built, #18):* branches live in the worker for the session. Each has its own checkpoint store (a fork shares the checkpoints before the branch point) and, when not on screen, a save of where it was left; only the branch on screen is a live engine. Switching saves the live engine and loads the other branch's save (tens of milliseconds). Comparison loads an inactive branch into a temporary engine to read its species, chronicle and series.
 
 ### 9.3 Crash safety
 

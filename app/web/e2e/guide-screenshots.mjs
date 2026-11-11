@@ -250,7 +250,33 @@ try {
   await shot("29-species-designer", page.locator(".modal.designer"));
   await page.getByRole("button", { name: "Cancel" }).click();
 
-  console.log("11. Resume after reload");
+  console.log("11. Branches: what if the climate cooled?");
+  await page.getByRole("button", { name: "⑂ Branch" }).click();
+  await page.getByText(/^Started "Branch 2"/).waitFor({ timeout: 20000 });
+  page.once("dialog", (d) => d.accept("Colder"));
+  await page.getByRole("button", { name: "Rename branch" }).click();
+  await page.getByRole("tab", { name: "World" }).click();
+  await page.getByRole("button", { name: "-2 °C" }).click();
+  await page.getByRole("button", { name: "-2 °C" }).click();
+  await jump("+1k yr");
+  const branchSelect = page.getByRole("combobox", { name: "Branch", exact: true });
+  await branchSelect.selectOption(await branchSelect.locator("option", { hasText: /^Main/ }).getAttribute("value"));
+  await page.getByText(/^Switched to "Main"/).waitFor({ timeout: 20000 });
+  await jump("+1k yr");
+  await noToasts();
+  await page.getByRole("button", { name: /^Checkpoint, year .* \(before a jump\)$/ }).last().dispatchEvent("click");
+  await page.getByRole("menuitem", { name: "Rewind here" }).waitFor();
+  await shot("30-branches", page.locator(".timebar"));
+  await page.getByRole("button", { name: /^Checkpoint, year .* \(before a jump\)$/ }).last().dispatchEvent("click");
+  await page.getByRole("button", { name: "Compare…" }).click();
+  const cmp = page.getByRole("dialog", { name: "Compare branches" });
+  await cmp.locator(".compare-grid svg").first().waitFor({ timeout: 20000 });
+  await cmp.getByRole("combobox", { name: "Trait to compare" }).selectOption({ label: "Insulation (fur/fat)" });
+  await page.waitForTimeout(500);
+  await shot("31-compare-branches", page.locator(".modal.compare-dialog"));
+  await cmp.getByRole("button", { name: "Close" }).click();
+
+  console.log("12. Resume after reload");
   await page.waitForTimeout(600);
   await page.reload();
   await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });

@@ -61,7 +61,8 @@ In the app:
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
 - **Jump ahead** (+100 to +100k years) fast-forwards in Population mode, or in Macro mode (1,000-year steps) for 20,000 years or more. The **10,000 years/s** and **1 My/s** speeds also use Macro mode; the badge at the top shows the mode in use.
-- The **Rewind** strip under the time bar holds checkpoints (every 10 simulated years, and before each jump and intervention, up to 200 MB): click one to go back to it. The Chronicle's **⟲** goes back to just before an event.
+- The **Rewind** strip under the time bar holds checkpoints (every 10 simulated years, and before each jump and intervention, up to 200 MB): click one to go back to it, or to start a branch from it. The Chronicle's **⟲** goes back to just before an event.
+- **Branches** split the timeline for "what if?" experiments: **⑂ Branch** keeps the current history and continues in a copy, the branch list switches between them, and **Compare…** overlays a species' population and trait charts from two branches and lists the events that differ.
 - **Run until…** fast-forwards until a new species arises, a species goes extinct, or a population or trait crosses a threshold.
 - In a crowded world, **shift-drag** a box on the map (or use **Watch region**) to watch that area animal by animal.
 - The **World** tab has map layers and interventions (climate shift, meteor, introduced species, epidemic).
@@ -95,7 +96,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | Evolution at scale (Population mode) | Age- and sex-structured demes per 8×8-tile patch; selection gradients from the same physiology functions; Wright–Fisher drift; mutation; migration along land borders, plus rare rafting |
 | Species | Automatic detection by reproductive compatibility (biological species concept), with hysteresis; allopatric vs parapatric/sympatric cause; generated binomial names; phylogeny with Newick export |
 | Deep time (Macro mode) | The same demes in 1,000-year steps: demography projected with the Population-mode model until it settles; trait means relax towards the optimum of the same fitness model at rate V_A·curvature (measured again every 100 years), with gene flow and drift; allele frequencies take one step of gene flow, range-wide Wright–Fisher drift, mutation and incompatibility selection, then follow the trait means. 1 My on `earth` in a few minutes |
-| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps) ↔ Macro mode (1,000-year steps), switched automatically by speed; focus regions; rewind to in-session checkpoints; deterministic replay; save/load |
+| Time | Individual mode (1-hour ticks) ↔ Population mode (1-year steps) ↔ Macro mode (1,000-year steps), switched automatically by speed; focus regions; rewind to in-session checkpoints; branch timelines and compare them; deterministic replay; save/load |
 
 ## Validation
 
@@ -114,6 +115,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | V-P2 Transitions | Population ↔ Macro switches conserve every deme exactly (TRD TR-X4 asks for ±5% abundance, ±0.1 SD traits); Individual ↔ Macro conserves abundance |
 | Macro mode | Deterministic, saves mid-run; the cold-adaptation cline forms in 5/5 seeds (V-B1) and populations across a strait become separate species within 65,000 years (V-S1) |
 | User templates | A world made from an exported template has the same state hash as the world it came from, for built-in, random and customised worlds; tampered files are rejected |
+| Branch timelines | Branches given the same actions stay identical; a branch with one extra intervention matches the other up to it, sample for sample and event for event, and differs afterwards |
 | Species designer | A design with an impossible energy budget is refused with the reason, in the designer, new worlds and interventions; a design made of a library species' values gives the same world as that species; designs survive saves, replays and templates; every library species passes the checks |
 | World editor | A one-patch-wide painted strait cuts land connectivity and rivers re-route; undo restores the exact previous hash; a replay with edits ends in the same state; a template keeps edits painted at year 0 |
 | "Why?": drift or selection | For traits nothing selects on, change ÷ expected drift SD has mean square ≈ 1 over 120 tests; in a small Blank Slate population those changes are reported as drift; in Ice Age, hares' insulation rise is reported as selection by cold stress |
