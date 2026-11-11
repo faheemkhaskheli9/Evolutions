@@ -5,7 +5,7 @@ use crate::world::{LandShape, WorldGenParams};
 use serde::{Deserialize, Serialize};
 
 /// Where founders of one species are released, in fractions of the map.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FounderGroup {
     pub species: String,
     pub count: u32,

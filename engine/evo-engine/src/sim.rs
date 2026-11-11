@@ -69,6 +69,10 @@ pub struct NewWorld {
     pub founders: Option<Vec<FounderGroup>>,
     #[serde(default)]
     pub realism: Option<Realism>,
+    /// The user template's name, when the world was made from one (PRD FR-W9). Kept in
+    /// the replay log, not the state, so it does not change `state_hash()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -166,33 +170,9 @@ impl Simulation {
                 .ok_or_else(|| format!("unknown template '{}'", cfg.template))?
         };
         let gen = cfg.gen.unwrap_or_else(|| tmpl.gen.clone());
-        if gen.width < 8
-            || gen.height < 8
-            || gen
-                .width
-                .checked_mul(gen.height)
-                .is_none_or(|n| n > 1 << 20)
-        {
-            return Err("world size must be between 8×8 and ~1M tiles".into());
-        }
-        if !(-90.0..=90.0).contains(&gen.lat_south)
-            || !(-90.0..=90.0).contains(&gen.lat_north)
-            || gen.lat_north <= gen.lat_south
-        {
-            return Err("latitudes must lie in −90…90 with north above south".into());
-        }
-        if !(0.0..=1.0).contains(&gen.land_fraction)
-            || !(0.0..=90.0).contains(&gen.axial_tilt)
-            || gen.precip_factor.is_nan()
-            || gen.precip_factor < 0.0
-            || !gen.temp_offset.is_finite()
-            || !gen.roughness.is_finite()
-            || !(1..=64).contains(&gen.plates)
-            || !(0.0..=20_000.0).contains(&gen.mountain_height_m)
-        {
-            return Err(
-                "invalid world settings (land fraction, tilt, rainfall, temperature, plates or mountain height)".into(),
-            );
+        validate_gen(&gen)?;
+        if let Some(f) = &cfg.founders {
+            validate_founders(f)?;
         }
         let world = World::generate(gen, cfg.seed);
         let mut params = SimParams::default();
@@ -1570,6 +1550,72 @@ impl Simulation {
         }
         h
     }
+}
+
+/// Checks generator settings (PRD FR-W1). Used for new worlds and user templates.
+pub fn validate_gen(gen: &WorldGenParams) -> Result<(), String> {
+    if gen.width < 8
+        || gen.height < 8
+        || gen
+            .width
+            .checked_mul(gen.height)
+            .is_none_or(|n| n > 1 << 20)
+    {
+        return Err("world size must be between 8×8 and ~1M tiles".into());
+    }
+    if !(-90.0..=90.0).contains(&gen.lat_south)
+        || !(-90.0..=90.0).contains(&gen.lat_north)
+        || gen.lat_north <= gen.lat_south
+    {
+        return Err("latitudes must lie in −90…90 with north above south".into());
+    }
+    if !(0.0..=1.0).contains(&gen.land_fraction)
+        || !(0.0..=90.0).contains(&gen.axial_tilt)
+        || gen.precip_factor.is_nan()
+        || gen.precip_factor < 0.0
+        || !gen.temp_offset.is_finite()
+        || !gen.roughness.is_finite()
+        || !(1..=64).contains(&gen.plates)
+        || !(0.0..=20_000.0).contains(&gen.mountain_height_m)
+    {
+        return Err(
+            "invalid world settings (land fraction, tilt, rainfall, temperature, plates or mountain height)".into(),
+        );
+    }
+    Ok(())
+}
+
+/// Checks founder groups: known species, sizes, diversity, release year and region.
+pub fn validate_founders(founders: &[FounderGroup]) -> Result<(), String> {
+    if founders.len() > 64 {
+        return Err("at most 64 founder groups".into());
+    }
+    for g in founders {
+        if crate::species_lib::find(&g.species).is_none() {
+            return Err(format!("unknown species '{}'", g.species));
+        }
+        if g.count == 0 || g.count > 20_000 {
+            return Err(format!("{}: founder count must be 1..20000", g.species));
+        }
+        if !(0.0..=1.0).contains(&g.diversity) {
+            return Err(format!("{}: diversity must be between 0 and 1", g.species));
+        }
+        if !(0.0..=1_000_000.0).contains(&g.delay_years) {
+            return Err(format!(
+                "{}: release year must be between 0 and 1,000,000",
+                g.species
+            ));
+        }
+        if let Some((fx, fy, r)) = g.region {
+            if !(0.0..=1.0).contains(&fx) || !(0.0..=1.0).contains(&fy) || !(r > 0.0 && r <= 1.0) {
+                return Err(format!(
+                    "{}: release region must lie inside the map",
+                    g.species
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Byte offset of `params.dmi_rate_factor` in a serialized `Simulation`: model_version (4),

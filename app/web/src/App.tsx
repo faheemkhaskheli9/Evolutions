@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
-import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, Why, WorldInfo } from "./engine/protocol";
+import { templateFileName } from "./engine/userTemplates";
+import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
 import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
@@ -79,6 +80,7 @@ export default function App() {
   const [progress, setProgress] = useState<{ done: number; total: number; label: string; title?: string } | null>(null);
   const [notices, setNotices] = useState<{ id: number; text: string; error?: boolean }[]>([]);
   const [showNew, setShowNew] = useState(true);
+  const [userTemplates, setUserTemplates] = useState<StoredTemplate[]>([]);
   const [busy, setBusy] = useState(false);
   const [founderSpecies, setFounderSpecies] = useState("hare");
   const [founderCount, setFounderCount] = useState(100);
@@ -100,6 +102,14 @@ export default function App() {
         case "ready":
           setCatalog(m.catalog);
           setAutosave(m.autosave);
+          setUserTemplates(m.templates);
+          break;
+        case "templates":
+          setUserTemplates(m.list);
+          if (m.added) {
+            if (m.download) downloadBlob(m.added.text, templateFileName(m.added.template.name), "application/json");
+            notify(`Template "${m.added.template.name}" saved${m.download ? " and downloaded" : ""}. It is listed under Your templates when you create a world.`);
+          }
           break;
         case "created":
           setWorld({ info: m.world, elevation: m.elevation, biome: m.biome, water: m.water, hydro: m.hydro });
@@ -350,6 +360,7 @@ export default function App() {
     const bytes = await file.arrayBuffer();
     client.send({ type: "load", bytes }, [bytes]);
   };
+  const importTemplate = async (file: File) => client.send({ type: "importTemplate", text: await file.text(), fileName: file.name });
   const restore = () => {
     setBusy(true);
     client.send({ type: "restore" });
@@ -614,6 +625,8 @@ export default function App() {
                 founderCount={founderCount}
                 setFounderCount={setFounderCount}
                 onExportReplay={() => client.send({ type: "exportReplay" })}
+                worldName={world?.info.template ?? ""}
+                onSaveTemplate={(name, description) => client.send({ type: "saveTemplate", name, description, download: true })}
                 onExportData={(what, species) => client.send({ type: "exportData", what, species })}
                 onReplay={() => client.send({ type: "replay" })}
                 busy={!!progress}
@@ -690,7 +703,16 @@ export default function App() {
         ))}
       </div>
 
-      {showNew && <NewWorldDialog catalog={catalog} onCreate={create} onLoad={load} autosave={world ? null : autosave} onRestore={restore} onClose={world ? () => setShowNew(false) : undefined} busy={busy} />}
+      {showNew && (
+        <NewWorldDialog
+          catalog={catalog} onCreate={create} onLoad={load} autosave={world ? null : autosave} onRestore={restore} onClose={world ? () => setShowNew(false) : undefined}
+          busy={busy}
+          templates={userTemplates}
+          onSaveTemplate={(name, description, config) => client.send({ type: "saveTemplate", name, description, config })}
+          onImportTemplate={(file) => void importTemplate(file)}
+          onRemoveTemplate={(id) => client.send({ type: "removeTemplate", id })}
+        />
+      )}
     </div>
   );
 }

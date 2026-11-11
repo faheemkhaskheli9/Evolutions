@@ -2,6 +2,7 @@ import { NumberInput } from "./NumberInput";
 import { useState } from "react";
 import type { AlleleInfo, Catalog, ExportKind, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
 import { ALLELE_RAMP } from "../util";
+import { TemplateForm } from "./TemplateForm";
 import type { Layer, Tool } from "./MapView";
 
 interface Props {
@@ -28,6 +29,10 @@ interface Props {
   founderCount: number;
   setFounderCount: (n: number) => void;
   onExportReplay: () => void;
+  /** The world's template name, offered as the name of a new user template. */
+  worldName: string;
+  /** Saves this world's creation settings as a user template and downloads it (PRD FR-W9). */
+  onSaveTemplate: (name: string, description: string) => void;
   onReplay: () => void;
   /** Downloads data files; `species` limits the time series to one species. */
   onExportData: (what: ExportKind, species?: number) => void;
@@ -61,6 +66,7 @@ export function WorldPanel(p: Props) {
   const [plagueSpecies, setPlagueSpecies] = useState<number | "">("");
   const [plagueRate, setPlagueRate] = useState(50);
   const [exportSpecies, setExportSpecies] = useState<number | "">("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const alive = p.species.filter((s) => s.extinct_year === null);
   return (
     <div className="panel-body">
@@ -222,6 +228,28 @@ export function WorldPanel(p: Props) {
           Replay from the start
         </button>
       </div>
+      <h3>Template</h3>
+      <p className="muted small">
+        Save how this world was created (its settings, seed and founders, not what has happened since) as a template file. Others import it in Create a world and start
+        the same world at year 0.
+      </p>
+      {savingTemplate ? (
+        <TemplateForm
+          initialName={p.worldName}
+          initialDescription=""
+          onCancel={() => setSavingTemplate(false)}
+          onSave={(name, description) => {
+            setSavingTemplate(false);
+            p.onSaveTemplate(name, description);
+          }}
+        />
+      ) : (
+        <div className="row wrap">
+          <button disabled={!p.status || p.busy} onClick={() => setSavingTemplate(true)}>
+            Save as template…
+          </button>
+        </div>
+      )}
       <h3>Export data</h3>
       <p className="muted small">
         Download the data for a spreadsheet, R or Python. The files are the same as the command-line runner writes (<code>evo run --csv --chronicle --newick --settings</code>).

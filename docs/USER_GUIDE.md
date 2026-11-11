@@ -32,7 +32,7 @@ The **Create a world** dialog opens when the app starts. To open it again later,
 
 ### Templates
 
-Pick one of nine starting worlds:
+Pick one of nine starting worlds, or one of [your own templates](#your-templates):
 
 | Template | What it is for |
 |---|---|
@@ -85,6 +85,19 @@ Tick **Customise world settings** to change the world generator:
 | **North edge / South edge** | The latitudes the map spans. This sets how much climate varies from top to bottom. |
 
 Click **Create world** to generate the terrain, climate, rivers and biomes and release the founders.
+
+### Your templates
+
+A template keeps a world's starting point: the world settings, seed, mutation rates and founder table, with a name and a description. Use one to start the same experiment again, or to give a whole class the same starting world.
+
+![Your templates in the Create dialog: a saved template with Export and remove buttons, and the Save as template form](guide/27-templates.png)
+
+- **Save as template…** (under **Your templates** in the Create dialog) keeps the dialog's current settings. Give it a name and, if you like, a note on what to look for.
+- **Save as template…** in the **World** tab (under **Template**) does the same for the open world, and also downloads the file. It saves how the world was created, not what has happened since.
+- Saved templates are listed under **Your templates**. Click one to fill in its settings; you can still change the seed or founders before creating the world. A world made from it is the same world, animal for animal, as the one the template was saved from, as long as you keep its seed.
+- **⤓ Export** downloads the template as a small `.evotemplate` file to send to others. **Import template…** adds a file someone sent you. **✕** removes a template from this browser.
+
+Templates are kept in this browser, like the autosave, so export the ones you want to keep. A file that is damaged, edited to impossible values (such as a count of 0 or a latitude beyond 90°), or made by a newer version of the app is refused with a message saying why. The format is described in the TRD (TR-DA5). The command-line runner reads the same files: `evo run --template-file lesson.evotemplate`.
 
 ---
 

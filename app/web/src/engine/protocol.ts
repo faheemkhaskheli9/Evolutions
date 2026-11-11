@@ -37,6 +37,35 @@ export interface NewWorldConfig {
   gen?: WorldGenParams | null;
   founders?: FounderGroup[];
   realism?: "Strict" | "Accelerated";
+  /** The user template's name, when the world is made from one. */
+  label?: string | null;
+}
+
+/** A user template file (`.evotemplate`, PRD FR-W9); mirrors the engine's `UserTemplate`. */
+export interface UserTemplate {
+  format: "evolutions-template";
+  version: number;
+  name: string;
+  description: string;
+  /** The built-in template the world is named after, or "random". */
+  base: string;
+  seed: number;
+  realism: "Strict" | "Accelerated";
+  gen: WorldGenParams;
+  founders: FounderGroup[];
+}
+
+/** A user template kept in the browser. `text` is the file, as the engine wrote it. */
+export interface StoredTemplate {
+  id: string;
+  savedAt: number;
+  text: string;
+  template: UserTemplate;
+}
+
+/** The settings to create a world from a user template. */
+export function templateConfig(t: UserTemplate): NewWorldConfig {
+  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name };
 }
 
 export interface Catalog {
@@ -288,7 +317,15 @@ export type ToWorker =
   /** Restores the latest checkpoint taken before chronicle event `event`. */
   | { type: "rewindBefore"; event: number }
   /** The state hash, to check that a rewound run repeats the original. */
-  | { type: "hash" };
+  | { type: "hash" }
+  /**
+   * Saves a user template of new-world settings, or of the current world's creation
+   * settings when `config` is absent (PRD FR-W9). `download` also offers the file.
+   */
+  | { type: "saveTemplate"; name: string; description: string; config?: NewWorldConfig; download?: boolean }
+  /** Checks a template file and keeps it. */
+  | { type: "importTemplate"; text: string; fileName: string }
+  | { type: "removeTemplate"; id: string };
 
 export interface FrameMsg {
   type: "frame";
@@ -315,7 +352,9 @@ export interface FrameMsg {
 }
 
 export type FromWorker =
-  | { type: "ready"; catalog: Catalog; autosave: AutosaveInfo | null }
+  | { type: "ready"; catalog: Catalog; autosave: AutosaveInfo | null; templates: StoredTemplate[] }
+  /** The user templates after a change; `added` is the one just saved or imported. */
+  | { type: "templates"; list: StoredTemplate[]; added?: StoredTemplate; download?: boolean }
   | { type: "created"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array; hydro: Hydrology }
   | FrameMsg
   /** Long-running work: a jump, or a replay (`title` names it; a jump has none). */

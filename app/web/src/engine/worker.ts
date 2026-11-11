@@ -2,8 +2,9 @@
 // Engine host: owns the WASM simulation, runs the time loop, and streams frames
 // to the UI (System Design §5 and §7).
 
-import init, { Engine, ReplayRun } from "../wasm/evo_wasm.js";
+import init, { Engine, ReplayRun, check_template, make_template } from "../wasm/evo_wasm.js";
 import { Autosaver, readAutosave, writeAutosave } from "./autosave";
+import { listTemplates, removeTemplate, storeTemplate } from "./userTemplates";
 import { CheckpointStore, compress, decompress, type CheckpointReason } from "./checkpoints";
 import { exportFiles, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
 import { smoothSpeed } from "../util";
@@ -622,6 +623,27 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
       case "hash":
         if (engine) post({ type: "hash", year: engine.year(), hash: engine.state_hash() });
         break;
+      case "saveTemplate": {
+        const text = m.config ? make_template(JSON.stringify(m.config), m.name, m.description) : engine?.user_template(m.name, m.description);
+        if (text) void keepTemplate(text, m.download);
+        break;
+      }
+      case "importTemplate": {
+        let text: string;
+        try {
+          text = check_template(m.text);
+        } catch (e) {
+          post({ type: "error", message: `Could not import ${m.fileName}: ${e instanceof Error ? e.message : String(e)}` });
+          break;
+        }
+        void keepTemplate(text);
+        break;
+      }
+      case "removeTemplate":
+        void removeTemplate(m.id)
+          .then(() => listTemplates())
+          .then((list) => post({ type: "templates", list }), fail);
+        break;
       case "replay":
         if (jumping) break;
         if (m.script !== undefined) void replay(m.script).catch(fail);
@@ -633,8 +655,19 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
   }
 };
 
+/** Stores a checked template and sends the new list. */
+async function keepTemplate(text: string, download = false) {
+  try {
+    const added = await storeTemplate(text);
+    post({ type: "templates", list: await listTemplates(), added, download });
+  } catch (e) {
+    post({ type: "error", message: `Could not keep the template in this browser (${e instanceof Error ? e.message : String(e)}).` });
+  }
+}
+
 init().then(async () => {
   const slot = await readAutosave().catch(() => undefined);
-  post({ type: "ready", catalog: JSON.parse(Engine.catalog()), autosave: slot?.info ?? null });
+  const templates = await listTemplates().catch(() => []);
+  post({ type: "ready", catalog: JSON.parse(Engine.catalog()), autosave: slot?.info ?? null, templates });
   loop();
 }, fail);

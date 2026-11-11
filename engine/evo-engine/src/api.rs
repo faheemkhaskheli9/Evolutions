@@ -45,7 +45,7 @@ impl Simulation {
             "tile_km": self.world.tile_km,
             "lat_north": self.world.gen.lat_north, "lat_south": self.world.gen.lat_south,
             "axial_tilt": self.world.gen.axial_tilt,
-            "template": self.template_name, "template_key": self.template_key,
+            "template": self.display_name(), "template_key": self.template_key,
             "seed": self.seed,
             "patch_size": self.params.patch_size,
         })

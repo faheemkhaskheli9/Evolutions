@@ -25,7 +25,7 @@ pub enum LandShape {
     MainlandAndIslands,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldGenParams {
     pub width: usize,
     pub height: usize,

@@ -1,7 +1,7 @@
 // End-to-end smoke test: build output served by `vite preview`, driven in Chromium.
 // Usage: npm run build && npm run test:e2e   (set SHOTS=dir to save screenshots)
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -248,6 +248,51 @@ try {
     await page.locator("header input[type=file]").setInputFiles(file);
     await page.getByText("Replaying…").waitFor();
     await page.getByText(/identical to the original run/).waitFor({ timeout: 300000 });
+  });
+  let templateFile;
+  await step("save the world as a template", async () => {
+    await page.getByRole("tab", { name: "World" }).click();
+    await page.getByRole("button", { name: "Save as template…" }).click();
+    await page.getByLabel("Template name").fill("Smoke lesson");
+    await page.getByLabel("Template description").fill("Hares, deer and wolves on a continent.");
+    const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save template" }).click()]);
+    if (d.suggestedFilename() !== "smoke-lesson.evotemplate") throw new Error(`bad template file name ${d.suggestedFilename()}`);
+    templateFile = join(tmpdir(), `evo-template-${process.pid}.evotemplate`);
+    await d.saveAs(templateFile);
+    const t = JSON.parse(readFileSync(templateFile, "utf8"));
+    if (t.format !== "evolutions-template" || t.name !== "Smoke lesson" || t.base !== "earth" || t.founders.length !== 3) throw new Error("bad template file");
+  });
+  await step("a tampered template is rejected", async () => {
+    const t = JSON.parse(readFileSync(templateFile, "utf8"));
+    t.founders[0].count = 0;
+    const bad = join(tmpdir(), `evo-template-bad-${process.pid}.evotemplate`);
+    writeFileSync(bad, JSON.stringify(t));
+    await page.getByRole("button", { name: "New world" }).click();
+    await page.getByLabel("Import template").setInputFiles(bad);
+    await page.getByText(/Could not import .*founder count must be 1\.\.20000/).waitFor();
+    await page.getByRole("button", { name: "Close" }).click();
+  });
+  await step("a template survives a reload and recreates its world", async () => {
+    await page.reload();
+    await page.getByText("Create a world").waitFor({ timeout: 20000 });
+    const seed = JSON.parse(readFileSync(templateFile, "utf8")).seed;
+    // Importing the downloaded file again keeps one copy.
+    await page.getByLabel("Import template").setInputFiles(templateFile);
+    await page.getByText(/Template "Smoke lesson" saved/).waitFor();
+    if ((await page.getByRole("button", { name: /^Smoke lesson/ }).count()) !== 1) throw new Error("template listed twice");
+    await page.getByRole("button", { name: /^Smoke lesson/ }).click();
+    if ((await page.getByLabel("Seed", { exact: true }).inputValue()) !== String(seed)) throw new Error("template seed not applied");
+    await page.getByRole("button", { name: "Create world" }).click();
+    await page.locator(".badge").waitFor({ timeout: 30000 });
+    const fromTemplate = await page.evaluate(() => window.__evoHash());
+    // The same world made from the built-in template with the same seed.
+    await page.getByRole("button", { name: "New world" }).click();
+    await page.getByRole("button", { name: /Earth-like Continent/ }).click();
+    await page.getByLabel("Seed", { exact: true }).fill(String(seed));
+    await page.getByRole("button", { name: "Create world" }).click();
+    await page.getByText("Create a world").waitFor({ state: "detached", timeout: 30000 });
+    const direct = await page.evaluate(() => window.__evoHash());
+    if (fromTemplate.year !== 0 || fromTemplate.hash !== direct.hash) throw new Error(`template world differs: ${JSON.stringify([fromTemplate, direct])}`);
   });
   const fatal = errors.filter((e) => !/favicon/.test(e));
   if (fatal.length) throw new Error(`page errors:\n${fatal.join("\n")}`);
