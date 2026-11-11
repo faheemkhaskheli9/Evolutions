@@ -40,7 +40,7 @@ const step = async (name, fn) => {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await step("engine loads and shows the new-world dialog", async () => {
-    await page.getByText("Create a world").waitFor({ timeout: 20000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ timeout: 20000 });
   });
   await step("customise world settings", async () => {
     await page.getByRole("button", { name: /Earth-like Continent/ }).click();
@@ -275,7 +275,7 @@ try {
   });
   await step("a template survives a reload and recreates its world", async () => {
     await page.reload();
-    await page.getByText("Create a world").waitFor({ timeout: 20000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ timeout: 20000 });
     const seed = JSON.parse(readFileSync(templateFile, "utf8")).seed;
     // Importing the downloaded file again keeps one copy.
     await page.getByLabel("Import template").setInputFiles(templateFile);
@@ -291,7 +291,7 @@ try {
     await page.getByRole("button", { name: /Earth-like Continent/ }).click();
     await page.getByLabel("Seed", { exact: true }).fill(String(seed));
     await page.getByRole("button", { name: "Create world" }).click();
-    await page.getByText("Create a world").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
     const direct = await page.evaluate(() => window.__evoHash());
     if (fromTemplate.year !== 0 || fromTemplate.hash !== direct.hash) throw new Error(`template world differs: ${JSON.stringify([fromTemplate, direct])}`);
   });
