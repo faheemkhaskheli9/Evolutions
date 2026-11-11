@@ -132,3 +132,27 @@ export function diffEvents(a: SimEvent[], b: SimEvent[]): { shared: number; only
   });
   return { shared: k, onlyA, onlyB: restB.filter((_, i) => !matched.has(i)) };
 }
+/**
+ * The year up to which branches `a` and `b` share their history: where the earlier of
+ * the two paths from their common ancestor leaves it. Null if they are not related.
+ */
+export function splitYear(branches: Pick<BranchInfo, "id" | "parent" | "fromYear">[], a: number, b: number): number | null {
+  const byId = new Map(branches.map((x) => [x.id, x]));
+  // Each ancestor of `a` (itself included), with the year a's path leaves it.
+  const leave = new Map<number, number>();
+  let year = Infinity;
+  for (let x = byId.get(a); x; x = x.parent === null ? undefined : byId.get(x.parent)) {
+    leave.set(x.id, year);
+    year = x.fromYear;
+  }
+  year = Infinity;
+  for (let x = byId.get(b); x; x = x.parent === null ? undefined : byId.get(x.parent)) {
+    const fromA = leave.get(x.id);
+    if (fromA !== undefined) {
+      const y = Math.min(fromA, year);
+      return isFinite(y) ? y : null;
+    }
+    year = x.fromYear;
+  }
+  return null;
+}
