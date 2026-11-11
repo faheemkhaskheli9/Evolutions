@@ -9,8 +9,8 @@ import { checkpointYear } from "./Timeline";
 export const BRANCH_COLORS = ["#6fcf8a", "#ff9a5a"] as const;
 
 /** Population or a trait mean of one species in one branch, as chart points. */
-export function branchSeries(side: CompareSide, species: number, trait: number | null, color: string): Series {
-  const m = side.metrics[species] ?? [];
+export function branchSeries(side: CompareSide, species: number, trait: number | null, color: string, from = -Infinity): Series {
+  const m = (side.metrics[species] ?? []).filter((s) => s.year >= from);
   const points: [number, number][] = trait === null ? m.map((s) => [s.year, s.n]) : m.filter((s) => s.n > 0).map((s) => [s.year, s.mean[trait]]);
   return { name: side.name, color, points };
 }
@@ -57,6 +57,10 @@ export function CompareBranches({
   const traitIndex = catalog.traits.findIndex((t) => t.key === trait);
   const traitMeta = catalog.traits[traitIndex];
   const split = splitYear(branches, a, b);
+  const [zoom, setZoom] = useState(true);
+  // Zoomed: as much time before the split as after it, so the shared lead-up shows too.
+  const end = data ? Math.max(data.a.year, data.b.year) : 0;
+  const from = zoom && split !== null ? split - Math.max(end - split, 1) : -Infinity;
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cmp-title">
@@ -111,14 +115,19 @@ export function CompareBranches({
                       </option>
                     ))}
                   </select>
+                  {split !== null && (
+                    <label className="small">
+                      <input type="checkbox" checked={zoom} onChange={(e) => setZoom(e.target.checked)} /> Zoom to the split
+                    </label>
+                  )}
                 </div>
                 {sp && (
                   <div className="compare-grid">
-                    <LineChart yLabel={`${sp.common_name}: population`} series={[branchSeries(data.a, sp.id, null, BRANCH_COLORS[0]), branchSeries(data.b, sp.id, null, BRANCH_COLORS[1])]} log />
+                    <LineChart yLabel={`${sp.common_name}: population`} series={[branchSeries(data.a, sp.id, null, BRANCH_COLORS[0], from), branchSeries(data.b, sp.id, null, BRANCH_COLORS[1], from)]} log />
                     {traitMeta && (
                       <LineChart
                         yLabel={`${sp.common_name}: ${traitMeta.label} (${traitMeta.unit}), mean`}
-                        series={[branchSeries(data.a, sp.id, traitIndex, BRANCH_COLORS[0]), branchSeries(data.b, sp.id, traitIndex, BRANCH_COLORS[1])]}
+                        series={[branchSeries(data.a, sp.id, traitIndex, BRANCH_COLORS[0], from), branchSeries(data.b, sp.id, traitIndex, BRANCH_COLORS[1], from)]}
                       />
                     )}
                   </div>
@@ -127,7 +136,7 @@ export function CompareBranches({
             )}
             <h3>What differs</h3>
             <p className="muted small">
-              The first {diff!.shared} speciations, extinctions and interventions are shared. After that:
+              The first {diff!.shared} speciations, extinctions and interventions are shared. After that, only one branch had:
             </p>
             <div className="compare-grid">
               <div>

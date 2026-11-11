@@ -230,8 +230,8 @@ Branches are exact. Two branches given the same actions stay identical, step for
 **Compare branches** shows the same species in two branches side by side:
 
 - Pick the two branches at the top. The dialog says in which year they split.
-- Pick a species that exists in both and a trait. The charts overlay its population (log scale) and the trait's mean in the two branches, each in its branch's colour.
-- **What differs** lists the speciations, extinctions, interventions, introductions and crashes that happened in only one of the branches after they split.
+- Pick a species that exists in both and a trait. The charts overlay its population (log scale) and the trait's mean in the two branches, each in its branch's colour. **Zoom to the split** (on by default) shows as much time before the split as after it; turn it off to see the whole history.
+- **What differs** lists the speciations, extinctions, interventions, introductions and crashes that happened in only one of the branches after they split. Events both had, such as a climate recovery scheduled before the split, are left out.
 
 ![Compare branches: population and insulation of the same species in two branches, and the events that differ](guide/31-compare-branches.png)
 

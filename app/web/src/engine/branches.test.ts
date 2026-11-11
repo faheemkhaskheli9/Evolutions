@@ -91,6 +91,14 @@ describe("diffEvents", () => {
     expect(d.onlyA.map((e) => e.text)).toEqual(["B dies"]);
     expect(d.onlyB.map((e) => e.text)).toEqual(["Meteor", "C splits"]);
   });
+  it("leaves out later events both branches have", () => {
+    const a = [ev(0, "Founders", "deer"), ev(5, "Intervention", "Cooling"), ev(9, "Intervention", "Climate recovers")];
+    const b = [ev(0, "Founders", "deer"), ev(9, "Intervention", "Climate recovers"), ev(12, "Extinction", "deer")];
+    const d = diffEvents(a, b);
+    expect(d.shared).toBe(1);
+    expect(d.onlyA.map((e) => e.text)).toEqual(["Cooling"]);
+    expect(d.onlyB.map((e) => e.text)).toEqual(["deer"]);
+  });
   it("finds nothing different in identical histories", () => {
     const a = [ev(0, "Founders", "deer"), ev(5, "Crash", "crash")];
     expect(diffEvents(a, [...a])).toEqual({ shared: 2, onlyA: [], onlyB: [] });

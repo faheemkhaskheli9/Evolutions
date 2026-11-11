@@ -266,7 +266,12 @@ try {
   await noToasts();
   await page.getByRole("button", { name: /^Checkpoint, year .* \(before a jump\)$/ }).last().dispatchEvent("click");
   await page.getByRole("menuitem", { name: "Rewind here" }).waitFor();
-  await shot("30-branches", page.locator(".timebar"));
+  {
+    // The checkpoint menu opens above the time bar: include the space it takes.
+    const tb = await page.locator(".timebar").boundingBox();
+    await page.screenshot({ path: `${out}/30-branches.png`, clip: { x: tb.x, y: tb.y - 80, width: tb.width, height: tb.height + 80 } });
+    console.log("  saved 30-branches");
+  }
   await page.getByRole("button", { name: /^Checkpoint, year .* \(before a jump\)$/ }).last().dispatchEvent("click");
   await page.getByRole("button", { name: "Compare…" }).click();
   const cmp = page.getByRole("dialog", { name: "Compare branches" });
