@@ -15,6 +15,7 @@
 //! use evo_engine::{NewWorld, Simulation};
 //! let mut sim = Simulation::new(NewWorld {
 //!     template: "blank".into(), seed: 1, gen: None, founders: None, realism: None,
+//!     label: None,
 //! }).unwrap();
 //! sim.run_steps(24);
 //! assert!(sim.population() > 0);
@@ -42,9 +43,11 @@ pub mod species;
 pub mod species_lib;
 pub mod templates;
 pub mod traits;
+pub mod user_template;
 pub mod world;
 
 pub use params::{Realism, SimParams};
 pub use replay::{Replay, ReplayScript};
 pub use sim::{Intervention, Mode, NewWorld, Simulation};
 pub use templates::FounderGroup;
+pub use user_template::UserTemplate;

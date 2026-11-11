@@ -31,7 +31,7 @@ Evolution is hard to see. It happens over thousands of generations, and its outc
 
 | Where | Use it to | Why it helps |
 |---|---|---|
-| **Classrooms and lectures** (school biology, university evolution and ecology courses) | Show natural selection, drift, speciation and predator–prey cycles live; set exercises such as "release hares on the Ice Age map and explain what happens to their fur" | Students see adaptation emerge from cause and effect rather than reading about it. Templates like *Island Dwarfism Lab* and *Blank Slate* are built for set experiments, and the same seed lets a whole class reproduce one run. |
+| **Classrooms and lectures** (school biology, university evolution and ecology courses) | Show natural selection, drift, speciation and predator–prey cycles live; set exercises such as "release hares on the Ice Age map and explain what happens to their fur" | Students see adaptation emerge from cause and effect rather than reading about it. Templates like *Island Dwarfism Lab* and *Blank Slate* are built for set experiments; a teacher can save their own setup as a template file, and the whole class starts from the same world. |
 | **Self-study and curiosity** | Ask "what if?": warmer climate, a meteor, wolves introduced to an island | Every outcome comes from genes, bodies, food, climate and chance. The Inspector shows each animal's state, the Chronicle records what changed, and the CLI's `--debug` shows why a population grows or declines. |
 | **Research and teaching labs** | Run the headless CLI for many seeds, export CSV time series and Newick trees, and analyse them in R or Python | Quick intuition-building for population-genetics and eco-evolutionary questions. The validation suite checks the engine against Hardy–Weinberg, Kimura fixation, the breeder's equation and other textbook results. |
 | **Museums, outreach and science communication** | Run *Earth-like Continent* or *East African Rift* on a screen and fast-forward through deep time | Nothing is scripted, so each run tells a different but plausible story. |
@@ -55,7 +55,7 @@ npm run dev           # open the printed URL
 ```
 
 In the app:
-- Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons.
+- Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons. **Save as template…** keeps your settings to reuse or share as a `.evotemplate` file.
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
 - **Jump ahead** (+100 to +100k years) fast-forwards in Population mode, or in Macro mode (1,000-year steps) for 20,000 years or more. The **10,000 years/s** and **1 My/s** speeds also use Macro mode; the badge at the top shows the mode in use.
@@ -78,7 +78,7 @@ cargo run --release -p evo-cli -- run --template ice_age --seed 7 --years 2000 \
 cargo run --release -p evo-cli -- info out/run.evo
 ```
 
-`--mode macro` runs in Macro mode (1,000-year steps; Population mode finishes the last part of a step); `--mode auto` (the default) uses it for runs of 20,000 years or more. `--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
+`--template-file lesson.evotemplate` creates the world from a user template (as saved or exported by the app; `--seed` replaces its seed), and `--save-template out.evotemplate` writes one for the run's world. `--mode macro` runs in Macro mode (1,000-year steps; Population mode finishes the last part of a step); `--mode auto` (the default) uses it for runs of 20,000 years or more. `--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
 
 ## What is simulated
 
@@ -111,6 +111,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | V-P1 Transitions | Individual ↔ Population switches conserve abundance, mean genetic values and diversity |
 | V-P2 Transitions | Population ↔ Macro switches conserve every deme exactly (TRD TR-X4 asks for ±5% abundance, ±0.1 SD traits); Individual ↔ Macro conserves abundance |
 | Macro mode | Deterministic, saves mid-run; the cold-adaptation cline forms in 5/5 seeds (V-B1) and populations across a strait become separate species within 65,000 years (V-S1) |
+| User templates | A world made from an exported template has the same state hash as the world it came from, for built-in, random and customised worlds; tampered files are rejected |
 | "Why?": drift or selection | For traits nothing selects on, change ÷ expected drift SD has mean square ≈ 1 over 120 tests; in a small Blank Slate population those changes are reported as drift; in Ice Age, hares' insulation rise is reported as selection by cold stress |
 
 `cargo test --release -- --ignored` also runs the long ecological tests:
@@ -120,7 +121,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 - **Macro mode speed:** 1,000,000 years on `earth` in under 10 minutes natively.
 
 The browser app has, in `app/web/`:
-- **Unit tests** (Vitest, under a second): `npm test`. They cover formatting and colour ramps, chart ticks, map-layer pixels, the engine client, autosave (with a fake IndexedDB), and a regression test for each unit-testable web bug from the audits.
+- **Unit tests** (Vitest, under a second): `npm test`. They cover formatting and colour ramps, chart ticks, map-layer pixels, the engine client, autosave and the user-template store (with a fake IndexedDB), and a regression test for each unit-testable web bug from the audits.
 - **Lint** (ESLint with the TypeScript and React Hooks rules): `npm run lint`, which fails on any warning.
 - **An end-to-end smoke test:** `npm run build && npm run test:e2e`.
 

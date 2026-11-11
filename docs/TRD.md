@@ -327,6 +327,21 @@ $$G_k = \mu_k + \sum_{\ell}\Big[a_{\ell k}(x_1) + a_{\ell k}(x_2)\Big] + \sum_{\
 **TR-DA4 Exports.** CSV (metrics, traits, individuals), Newick and NeXML (phylogeny), JSON (templates), PNG (map layers).
 *Implemented:* per-species metrics CSV (`year,n,het`, trait means, then `<trait>_sd`), Chronicle CSV (`year,kind,species,species_name,text`, RFC 4180 quoting), Newick, and the creation settings as JSON (`format: "evolutions-settings"`). The writers live in `evo_engine::export`; the CLI (`--csv`, `--chronicle`, `--newick`, `--settings`) and the browser app (through `evo-wasm`) call the same functions, so their files are byte-identical (`evo-cli/tests/export.rs`).
 **TR-DA5 Templates** are JSON/TOML files validated against a published JSON Schema: world generation parameters or painted heightmap (PNG 16-bit), climate settings, founder species definitions, events schedule.
+*Implemented (user templates, FR-W9/FR-P3):* a `.evotemplate` file is UTF-8 JSON, at most 256 KB, read and written by `evo_engine::user_template`:
+
+| Field | Type | Rule |
+|---|---|---|
+| `format` | string | `"evolutions-template"` |
+| `version` | integer | `1`. A higher version is rejected with "made by a newer version"; each later version will be read by newer engines. |
+| `name` | string | 1–80 characters after trimming, no control characters |
+| `description` | string | at most 2,000 characters; may be absent |
+| `base` | string | a built-in template key or `"random"`; the world takes its name (`template_key`, `template_name`) from it |
+| `seed` | integer | 0 … 2⁵³ − 1 (so JavaScript keeps it exact) |
+| `realism` | string | `"Accelerated"` or `"Strict"` |
+| `gen` | object | every `WorldGenParams` field, with the same checks as new-world settings (FR-W1): size 8×8 to about 1M tiles, latitudes in −90…90 with north above south, land fraction 0–1, tilt 0–90°, rainfall ≥ 0, 1–64 plates, mountains 0–20,000 m |
+| `founders` | array | 1–64 groups of `{species, count, diversity, region, delay_years}`: a library species, count 1–20,000, diversity 0–1, region `null` or `[fx, fy, r]` with fx, fy in 0–1 and 0 < r ≤ 1, release year 0–1,000,000 |
+
+Unknown top-level fields are rejected. `gen` and `founders` are always complete, so a template does not change when a built-in template's settings do. The world created from a template is `Simulation::new` with these settings and `label` = `name`; the label is kept in the replay log, outside `state_hash()`, so the world is state-for-state the one the template was saved from (`user_template_recreates_the_world`). A template holds creation settings only, not the state or interventions since. Painted terrain (FR-W3) will be added as an optional field in format version 2.
 
 ## 9. Validation and testing requirements
 

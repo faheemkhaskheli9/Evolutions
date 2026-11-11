@@ -1,7 +1,9 @@
 import { NumberInput } from "./NumberInput";
-import { useEffect, useState } from "react";
-import type { AutosaveInfo, Catalog, FounderGroup, LandShape, NewWorldConfig, WorldGenParams } from "../engine/protocol";
-import { rgb } from "../util";
+import { useState } from "react";
+import { templateConfig, type AutosaveInfo, type Catalog, type FounderGroup, type LandShape, type NewWorldConfig, type StoredTemplate, type WorldGenParams } from "../engine/protocol";
+import { templateFileName } from "../engine/userTemplates";
+import { downloadBlob, rgb } from "../util";
+import { TemplateForm } from "./TemplateForm";
 
 interface Props {
   catalog: Catalog;
@@ -12,7 +14,16 @@ interface Props {
   onRestore: () => void;
   onClose?: () => void;
   busy: boolean;
+  /** User templates kept in this browser (PRD FR-W9). */
+  templates: StoredTemplate[];
+  /** Saves the dialog's settings as a user template. */
+  onSaveTemplate: (name: string, description: string, config: NewWorldConfig) => void;
+  onImportTemplate: (file: File) => void;
+  onRemoveTemplate: (id: string) => void;
 }
+
+/** The key of a user template in the template picker. */
+const userKey = (id: string) => `user:${id}`;
 
 const RANDOM_FOUNDERS: FounderGroup[] = [
   { species: "hare", count: 400, diversity: 0.8 },
@@ -88,19 +99,42 @@ function WorldSettings({ gen, set }: { gen: WorldGenParams; set: (patch: Partial
   );
 }
 
-export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore, onClose, busy }: Props) {
-  const [template, setTemplate] = useState(catalog.templates[0]?.key ?? "earth");
+export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore, onClose, busy, templates, onSaveTemplate, onImportTemplate, onRemoveTemplate }: Props) {
+  const first = catalog.templates[0];
+  const [template, setTemplate] = useState(first?.key ?? "earth");
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1e6));
   const [realism, setRealism] = useState<"Accelerated" | "Strict">("Accelerated");
-  const [founders, setFounders] = useState<FounderGroup[]>([]);
+  const [founders, setFounders] = useState<FounderGroup[]>(() => (first?.founders ?? RANDOM_FOUNDERS).map((f) => ({ ...f })));
   const [customise, setCustomise] = useState(false);
-  const [gen, setGen] = useState<WorldGenParams>(catalog.default_gen);
+  const [gen, setGen] = useState<WorldGenParams>(() => ({ ...(first?.gen ?? catalog.default_gen) }));
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
-  useEffect(() => {
-    const t = catalog.templates.find((x) => x.key === template);
-    setFounders(t ? t.founders.map((f) => ({ ...f })) : RANDOM_FOUNDERS.map((f) => ({ ...f })));
+  const userTemplate = templates.find((t) => userKey(t.id) === template) ?? null;
+  /** Picks a template: a built-in one, "random", or a user template (`user:<id>`). */
+  const choose = (key: string) => {
+    setTemplate(key);
+    const own = templates.find((t) => userKey(t.id) === key);
+    if (own) {
+      const cfg = templateConfig(own.template);
+      setFounders(cfg.founders ?? []);
+      setGen(cfg.gen ?? catalog.default_gen);
+      setSeed(cfg.seed);
+      setRealism(own.template.realism);
+      return;
+    }
+    const t = catalog.templates.find((x) => x.key === key);
+    setFounders((t?.founders ?? RANDOM_FOUNDERS).map((f) => ({ ...f })));
     setGen({ ...(t?.gen ?? catalog.default_gen) });
-  }, [template, catalog]);
+  };
+  /** The world the dialog would create now. A user template always gives its own generator settings. */
+  const config = (): NewWorldConfig => ({
+    template: userTemplate ? userTemplate.template.base : template,
+    seed,
+    realism,
+    gen: customise || userTemplate ? gen : null,
+    founders: founders.map((f) => ({ ...f, region: f.region ?? null })),
+    label: userTemplate ? userTemplate.template.name : null,
+  });
   const latOk = gen.lat_north > gen.lat_south;
 
   const update = (i: number, patch: Partial<FounderGroup>) => setFounders((fs) => fs.map((f, k) => (k === i ? { ...f, ...patch } : f)));
@@ -135,12 +169,78 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
         </p>
         <div className="templates">
           {[...catalog.templates, { key: "random", name: "Random world", description: "Continents, climate and founders generated from the seed.", founders: [], gen: catalog.default_gen }].map((t) => (
-            <button key={t.key} className={`template ${template === t.key ? "active" : ""}`} onClick={() => setTemplate(t.key)} aria-pressed={template === t.key}>
+            <button key={t.key} className={`template ${template === t.key ? "active" : ""}`} onClick={() => choose(t.key)} aria-pressed={template === t.key}>
               <b>{t.name}</b>
               <span>{t.description}</span>
             </button>
           ))}
         </div>
+        <section className="user-templates" aria-label="Your templates">
+          <div className="row between wrap gap">
+            <h3>Your templates</h3>
+            <span className="row wrap gap">
+              <label className="button file" title="Add a template file (.evotemplate) someone shared with you">
+                Import template…
+                <input
+                  type="file"
+                  accept=".evotemplate,.json"
+                  aria-label="Import template"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) onImportTemplate(file);
+                  }}
+                />
+              </label>
+              <button onClick={() => setSavingTemplate(true)} disabled={savingTemplate || founders.length === 0 || (customise && !latOk)} title="Keep these settings as a template you can reuse and share">
+                Save as template…
+              </button>
+            </span>
+          </div>
+          {savingTemplate && (
+            <TemplateForm
+              initialName={userTemplate?.template.name ?? ""}
+              initialDescription={userTemplate?.template.description ?? ""}
+              onCancel={() => setSavingTemplate(false)}
+              onSave={(name, description) => {
+                setSavingTemplate(false);
+                onSaveTemplate(name, description, { ...config(), label: null });
+              }}
+            />
+          )}
+          {templates.length === 0 ? (
+            <p className="muted small">
+              Save these settings as a template to start the same world again, or export it and send it to others (a class can all start from the same experiment).
+            </p>
+          ) : (
+            <div className="templates">
+              {templates.map((t) => (
+                <div key={t.id} className={`template user ${template === userKey(t.id) ? "active" : ""}`}>
+                  <button className="pick" onClick={() => choose(userKey(t.id))} aria-pressed={template === userKey(t.id)}>
+                    <b>{t.template.name}</b>
+                    <span>{t.template.description || `${t.template.founders.length} founder group${t.template.founders.length === 1 ? "" : "s"} · seed ${t.template.seed}`}</span>
+                  </button>
+                  <span className="row gap template-actions">
+                    <button className="ghost small" onClick={() => downloadBlob(t.text, templateFileName(t.template.name), "application/json")} aria-label={`Export ${t.template.name}`} title="Download the template file to share">
+                      ⤓ Export
+                    </button>
+                    <button
+                      className="ghost small"
+                      onClick={() => {
+                        if (template === userKey(t.id)) choose(first?.key ?? "earth");
+                        onRemoveTemplate(t.id);
+                      }}
+                      aria-label={`Remove ${t.template.name}`}
+                      title="Remove from this browser"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
         <div className="row wrap gap">
           <label>
             Seed{" "}
@@ -160,7 +260,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
         <label className="row gap customise">
           <input type="checkbox" checked={customise} onChange={(e) => setCustomise(e.target.checked)} />
           Customise world settings
-          <span className="muted small">{template === "random" && !customise ? "(random settings from the seed)" : ""}</span>
+          <span className="muted small">{template === "random" && !customise ? "(random settings from the seed)" : userTemplate && !customise ? "(the template's settings)" : ""}</span>
         </label>
         {customise && <WorldSettings gen={gen} set={(patch) => setGen((g) => ({ ...g, ...patch }))} />}
         {customise && !latOk && <p className="small error-text">The north edge must be north of the south edge.</p>}
@@ -228,7 +328,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
           <button
             className="primary"
             disabled={busy || founders.length === 0 || (customise && !latOk)}
-            onClick={() => onCreate({ template, seed, realism, gen: customise ? gen : null, founders: founders.map((f) => ({ ...f, region: f.region ?? null })) })}
+            onClick={() => onCreate(config())}
           >
             {busy ? "Generating…" : "Create world"}
           </button>

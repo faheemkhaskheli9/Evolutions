@@ -8,7 +8,7 @@
 //! ```
 
 use evo_engine::macro_mode::MACRO_STEP_YEARS;
-use evo_engine::{Mode, NewWorld, Realism, Simulation};
+use evo_engine::{Mode, NewWorld, Realism, Simulation, UserTemplate};
 
 /// Runs at least this long use Macro mode in `--mode auto` (System Design §5).
 const AUTO_MACRO_YEARS: f64 = 20_000.0;
@@ -21,6 +21,8 @@ fn usage() -> ! {
   evo list                                   list templates and species
   evo run [options]                          run a simulation headless
       --template <key|random>  (default earth)
+      --template-file <file>   create the world from a user template (.evotemplate);
+                               --seed, if given, replaces the template's seed
       --seed <u64>             (default 1)
       --years <f64>            (default 100)
       --mode auto|individual|population|macro   (default auto; auto uses Macro mode
@@ -34,6 +36,7 @@ fn usage() -> ! {
       --newick <file>          write the phylogeny
       --why <file>             write the \"Why?\" explanations of Chronicle events as JSON
       --settings <file>        write the world's creation settings as JSON
+      --save-template <file>   write the world's creation settings as a user template
       --quiet                  no progress output
       --debug                  print each species' yearly vital rates (Population mode)
   evo info <file.evo>        summarise a save file"
@@ -59,6 +62,8 @@ fn parse(args: &[String]) -> HashMap<String, String> {
 
 const RUN_OPTIONS: &[&str] = &[
     "template",
+    "template-file",
+    "save-template",
     "seed",
     "years",
     "mode",
@@ -158,6 +163,14 @@ fn main() {
                 eprintln!("unknown option '{k}'");
                 usage();
             }
+            if o.contains_key("template-file") {
+                for k in ["template", "strict", "load"] {
+                    if o.contains_key(k) {
+                        eprintln!("--template-file cannot be combined with --{k}");
+                        std::process::exit(2)
+                    }
+                }
+            }
             let seed: u64 = num(&o, "seed", 1);
             let years: f64 = num(&o, "years", 100.0);
             if !(years.is_finite() && years >= 0.0) {
@@ -179,6 +192,23 @@ fn main() {
                     eprintln!("{e}");
                     std::process::exit(1)
                 })
+            } else if let Some(path) = o.get("template-file") {
+                let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+                    eprintln!("cannot read {path}: {e}");
+                    std::process::exit(1)
+                });
+                let t = UserTemplate::parse(&text).unwrap_or_else(|e| {
+                    eprintln!("{path}: {e}");
+                    std::process::exit(1)
+                });
+                let mut cfg = t.new_world();
+                if o.contains_key("seed") {
+                    cfg.seed = seed;
+                }
+                Simulation::new(cfg).unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(1)
+                })
             } else {
                 Simulation::new(NewWorld {
                     template: o.get("template").cloned().unwrap_or_else(|| "earth".into()),
@@ -190,6 +220,7 @@ fn main() {
                     } else {
                         Realism::Accelerated
                     }),
+                    label: None,
                 })
                 .unwrap_or_else(|e| {
                     eprintln!("{e}");
@@ -283,6 +314,14 @@ fn main() {
             if let Some(path) = o.get("settings") {
                 let json = serde_json::to_string_pretty(&sim.settings_json()).unwrap();
                 std::fs::write(path, json).expect("write settings");
+            }
+            if let Some(path) = o.get("save-template") {
+                let name = sim.display_name().to_string();
+                let t = sim.user_template(&name, "").unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(1)
+                });
+                std::fs::write(path, t.to_json()).expect("write template");
             }
             if let Some(path) = o.get("why") {
                 std::fs::write(path, sim.explanations_json().to_string()).expect("write why");

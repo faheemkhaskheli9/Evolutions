@@ -322,6 +322,7 @@ fn blank(seed: u64) -> Simulation {
         gen: None,
         founders: None,
         realism: None,
+        label: None,
     })
     .unwrap()
 }
@@ -494,6 +495,7 @@ fn gradient_world(seed: u64, founders: Vec<FounderGroup>) -> Simulation {
         }),
         founders: Some(founders),
         realism: None,
+        label: None,
     })
     .unwrap()
 }
@@ -566,6 +568,7 @@ fn v_s1_allopatric_speciation() {
             delay_years: 0.0,
         }]),
         realism: None,
+        label: None,
     })
     .unwrap();
     // Raise the sea in a vertical band to split the world in two.
@@ -728,6 +731,7 @@ fn custom_world_settings_apply_and_are_validated() {
             gen: Some(gen),
             founders: Some(vec![]),
             realism: None,
+            label: None,
         })
     };
     let gen = WorldGenParams {
@@ -817,6 +821,7 @@ fn bad_world_settings_are_rejected() {
             gen: Some(gen),
             founders: Some(vec![]),
             realism: None,
+            label: None,
         })
     };
     assert!(make(&|g| {
@@ -862,6 +867,7 @@ fn river_and_lake_layers_are_consistent() {
         gen: None,
         founders: Some(vec![]),
         realism: None,
+        label: None,
     })
     .unwrap();
     let water = s.layer("water");
@@ -1086,6 +1092,7 @@ fn fst_world(strait: bool) -> Simulation {
             delay_years: 0.0,
         }]),
         realism: None,
+        label: None,
     })
     .unwrap();
     if strait {
@@ -1145,6 +1152,7 @@ fn why_insulation_rises_from_cold_in_the_ice_age() {
         gen: None,
         founders: None,
         realism: None,
+        label: None,
     })
     .unwrap();
     s.set_mode(Mode::Population).unwrap();
@@ -1173,6 +1181,7 @@ fn why_insulation_event_names_cold_stress() {
         gen: None,
         founders: None,
         realism: None,
+        label: None,
     })
     .unwrap();
     s.run_years(1.0);
@@ -1209,6 +1218,7 @@ fn why_neutral_trait_change_is_drift_in_a_small_population() {
             delay_years: 0.0,
         }]),
         realism: None,
+        label: None,
     })
     .unwrap();
     s.params.habitat_m2_per_tile = 100.0;
@@ -1264,6 +1274,7 @@ fn drift_test_is_calibrated_on_neutral_traits() {
                 delay_years: 0.0,
             }]),
             realism: None,
+            label: None,
         })
         .unwrap();
         s.params.habitat_m2_per_tile = 100.0;
@@ -1554,6 +1565,7 @@ fn fst_world_split(seed: u64) -> Simulation {
             delay_years: 0.0,
         }]),
         realism: None,
+        label: None,
     })
     .unwrap();
     let w = s.world.w;
@@ -1595,6 +1607,7 @@ fn macro_mode_runs_a_million_years_on_earth_in_ten_minutes() {
         gen: None,
         founders: None,
         realism: None,
+        label: None,
     })
     .unwrap();
     s.set_mode(Mode::Population).unwrap();
@@ -1611,4 +1624,68 @@ fn macro_mode_runs_a_million_years_on_earth_in_ten_minutes() {
     );
     assert!(s.population() > 0);
     assert!(secs < 600.0, "1 My took {secs:.0} s");
+}
+
+/// FR-W9/FR-P3 (#23): a world created from an exported user template is the world
+/// the template came from, state for state, at year 0.
+#[test]
+fn user_template_recreates_the_world() {
+    use evo_engine::{Realism, UserTemplate};
+    let custom = NewWorld {
+        template: "earth".into(),
+        seed: 314,
+        gen: Some(WorldGenParams {
+            width: 96,
+            height: 48,
+            temp_offset: -3.5,
+            land_fraction: 0.55,
+            ..Default::default()
+        }),
+        founders: Some(vec![
+            FounderGroup {
+                species: "mouse".into(),
+                count: 250,
+                diversity: 0.4,
+                region: Some((0.3, 0.4, 0.2)),
+                delay_years: 0.0,
+            },
+            FounderGroup {
+                species: "cat".into(),
+                count: 30,
+                diversity: 0.9,
+                region: None,
+                delay_years: 25.0,
+            },
+        ]),
+        realism: Some(Realism::Strict),
+        label: None,
+    };
+    let worlds = [
+        ("island_dwarfism", None),
+        ("random", None),
+        ("earth", Some(custom)),
+    ];
+    for (key, cfg) in worlds {
+        let cfg = cfg.unwrap_or(NewWorld {
+            template: key.into(),
+            seed: 21,
+            gen: None,
+            founders: None,
+            realism: None,
+            label: None,
+        });
+        let original = Simulation::new(cfg).unwrap();
+        let file = original
+            .user_template("Lesson 3", "Same start for everyone.")
+            .unwrap()
+            .to_json();
+        let t = UserTemplate::parse(&file).unwrap();
+        let copy = Simulation::new(t.new_world()).unwrap();
+        assert_eq!(copy.state_hash(), original.state_hash(), "{key}");
+        assert_eq!(copy.display_name(), "Lesson 3");
+        // The copy saves and loads with its label.
+        let back = Simulation::load_bytes(&copy.save_bytes().unwrap()).unwrap();
+        assert_eq!(back.display_name(), "Lesson 3");
+        assert_eq!(back.state_hash(), original.state_hash());
+    }
 }

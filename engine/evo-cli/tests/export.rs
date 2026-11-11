@@ -20,6 +20,7 @@ fn cli_export_matches_engine_export_for_a_save() {
         gen: None,
         founders: None,
         realism: None,
+        label: None,
     })
     .unwrap();
     sim.run_steps(24 * 30);
@@ -71,6 +72,7 @@ fn export_files_have_the_documented_columns() {
         gen: None,
         founders: None,
         realism: None,
+        label: None,
     })
     .unwrap();
     sim.run_steps(24);

@@ -1,7 +1,7 @@
 //! WebAssembly bindings: the browser app drives the engine from a Web Worker
 //! through this API (System Design §7). Queries return JSON strings or typed arrays.
 
-use evo_engine::{Intervention, Mode, NewWorld, Replay, ReplayScript, Simulation};
+use evo_engine::{Intervention, Mode, NewWorld, Replay, ReplayScript, Simulation, UserTemplate};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -11,6 +11,22 @@ pub struct Engine {
 
 fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
+}
+
+/// A user template (`.evotemplate` JSON) from new-world settings, before the world exists.
+#[wasm_bindgen]
+pub fn make_template(config_json: &str, name: &str, description: &str) -> Result<String, JsError> {
+    let cfg: NewWorld = serde_json::from_str(config_json).map_err(err)?;
+    Ok(UserTemplate::from_new_world(&cfg, name, description)
+        .map_err(err)?
+        .to_json())
+}
+
+/// Checks a template file and returns it in its normal form, or an error saying why
+/// it was rejected.
+#[wasm_bindgen]
+pub fn check_template(text: &str) -> Result<String, JsError> {
+    Ok(UserTemplate::parse(text).map_err(err)?.to_json())
 }
 
 /// A replay in progress: run it in slices with `advance`, then take the world with `finish`.
@@ -84,12 +100,12 @@ impl Engine {
         self.sim.save_bytes().map_err(err)
     }
 
-    /// The world's replay script (creation settings and every action) as JSON (PRD FR-P2).
     /// Deterministic hash of the state, in hex (TRD TR-D7); equal hashes mean equal worlds.
     pub fn state_hash(&self) -> String {
         format!("{:016x}", self.sim.state_hash())
     }
 
+    /// The world's replay script (creation settings and every action) as JSON (PRD FR-P2).
     pub fn replay_script(&self) -> Result<String, JsError> {
         let script = self.sim.replay_script().map_err(err)?;
         serde_json::to_string_pretty(&script).map_err(err)
@@ -216,6 +232,15 @@ impl Engine {
     /// The world's creation settings as JSON, the same file as `evo run --settings`.
     pub fn settings_json(&self) -> String {
         serde_json::to_string_pretty(&self.sim.settings_json()).unwrap_or_default()
+    }
+
+    /// A user template (`.evotemplate` JSON) of this world's creation settings (PRD FR-W9).
+    pub fn user_template(&self, name: &str, description: &str) -> Result<String, JsError> {
+        Ok(self
+            .sim
+            .user_template(name, description)
+            .map_err(err)?
+            .to_json())
     }
 
     pub fn inspect(&self, id: f64) -> String {
