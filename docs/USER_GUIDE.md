@@ -11,6 +11,8 @@ All screenshots come from a single run of the Earth-like Continent template, see
 2. [The main screen](#2-the-main-screen)
 3. [Watch individual animals](#3-watch-individual-animals)
 4. [Control time](#4-control-time)
+    - [Rewind](#rewind)
+    - [Branches: what if?](#branches-what-if)
 5. [Individual, Population and Macro modes](#5-individual-population-and-macro-modes)
 6. [Species: populations and traits over time](#6-species-populations-and-traits-over-time)
 7. [Tree of life](#7-tree-of-life)
@@ -198,13 +200,50 @@ During a jump, a progress card shows the year reached. **Stop here** ends the ju
 
 The app keeps checkpoints of the world as it runs, so you can go back to an earlier point, watch a population crash again, or try a different intervention, without starting over.
 
-The **Rewind** strip under the time bar runs from the start of the world (left) to now (the white line on the right). Each mark is a checkpoint; hover it to see its year. Click a mark to rewind to it.
+The **Rewind** strip under the time bar runs from the start of the world (left) to now (the white line on the right). Each mark is a checkpoint; hover it to see its year. Click a mark, then choose **Rewind here** to go back to it, or **⑂ Branch from here** to start a new branch from it (see [Branches](#branches-what-if)).
 
 - Checkpoints are taken when the world is created or opened, every 10 simulated years (at most about one a second while fast-forwarding, and at least every 30 seconds while time runs slowly), just before each jump (green marks) and just before each intervention (yellow marks).
 - They are compressed and kept in memory, up to 200 MB. When that fills up, older checkpoints are thinned out: the recent past keeps many, the distant past fewer. The number of checkpoints and the memory they use are shown on the right.
 - **Rewinding discards what happened after the checkpoint**, including later checkpoints. Running forward again from the same checkpoint, with the same actions, gives exactly the same world as the first time.
 - In the **Chronicle**, the **⟲** button on an entry rewinds to the latest checkpoint before that event (for example, just before a climate shift you applied).
 - Checkpoints last for this session only. To keep a point in time, use **Save**.
+
+### Branches: what if?
+
+Rewinding throws away what came after. A **branch** keeps it: the world's history splits in two, and you can switch between the versions and compare them. Use branches for "what if?" experiments, such as a meteor, a climate shift or a newly introduced predator.
+
+![The time bar with two branches: the branch switcher, Branch, rename, Remove and Compare, and the menu of a checkpoint](guide/30-branches.png)
+
+| Control | What it does |
+|---|---|
+| **⑂ Branch** | Starts a new branch from the present. You continue in the new branch; the one you left stays exactly where it was. |
+| **⑂ Branch from here** | In the menu of a checkpoint mark: starts a new branch from that checkpoint, without discarding anything. |
+| **Branch** list | Switches to another branch. The world, charts, chronicle and checkpoints all change to that branch's. Each entry shows the year it split off. |
+| **✎** | Renames the branch shown. |
+| **Remove…** | Removes another branch (the one shown can't be removed). |
+| **Compare…** | Opens the comparison of two branches. |
+
+Each branch has its own checkpoints and its own replay log. Only the branch on screen is simulated; the others wait, paused, where you left them. Switching takes a fraction of a second. You can keep up to 8 branches. Like checkpoints, they last for this session only: to keep a branch, switch to it and use **Save** or **Export replay**. A new, opened or replayed world starts with a single branch called **Main**.
+
+Branches are exact. Two branches given the same actions stay identical, step for step, and a branch with one extra intervention matches the other up to that intervention and differs only after it.
+
+**Compare branches** shows the same species in two branches side by side:
+
+- Pick the two branches at the top. The dialog says in which year they split.
+- Pick a species that exists in both and a trait. The charts overlay its population (log scale) and the trait's mean in the two branches, each in its branch's colour. **Zoom to the split** (on by default) shows as much time before the split as after it; turn it off to see the whole history.
+- **What differs** lists the speciations, extinctions, interventions, introductions and crashes that happened in only one of the branches after they split. Events both had, such as a climate recovery scheduled before the split, are left out.
+
+![Compare branches: population and insulation of the same species in two branches, and the events that differ](guide/31-compare-branches.png)
+
+**Worked example: what if the climate cooled?**
+
+1. Create an Earth-like Continent world and run it for a few hundred years, until the species have settled.
+2. Click **⑂ Branch**. You are now in **Branch 2**; click **✎** and call it *Colder*.
+3. In the **World** tab, click **−2 °C** twice.
+4. Click **+1k yr**.
+5. Switch back to **Main** in the branch list. Main is still in the year you branched; click **+1k yr** so that both branches have run the same length of time.
+6. Click **Compare…**, pick a species that lives in both, and choose **Insulation (fur/fat)**. Until the year they split, the two lines are one; afterwards they part, and you can see whether insulation rose faster in the colder branch and which species the cold suited. **What differs** lists the climate shift, and any extinctions or new species it led to.
+7. To try a different idea from the same moment, click the mark from before the climate shift and choose **⑂ Branch from here**.
 
 ---
 
@@ -491,8 +530,8 @@ When the replay ends, a message says whether the world is identical to the origi
 
 ## 15. Tips for good experiments
 
-- **Try again from the same moment:** rewind to just before an event (the **⟲** in the Chronicle) and do something different, such as a smaller meteor or no epidemic.
-- **Compare like with like:** use the same seed and change one thing, such as the climate, a founder count or mutation rates. Then compare the Species charts.
+- **Try again from the same moment:** rewind to just before an event (the **⟲** in the Chronicle) and do something different, such as a smaller meteor or no epidemic. Or branch instead, to keep both versions and compare them (see [Branches](#branches-what-if)).
+- **Compare like with like:** use the same seed and change one thing, such as the climate, a founder count or mutation rates. Then compare the Species charts. For a change during a run, branch first and use **Compare…**.
 - **See natural selection:** the **Ice Age Eurasia** template with 1,000–5,000 years of jumps shows insulation rising. The **Desert & Oasis** template shows kidneys and heat tolerance improving.
 - **See a bottleneck:** strike a species with a 90% epidemic, then watch its neutral genetic diversity in the Species tab.
 - **See predator–prey dynamics:** in the Earth-like template, watch the wolf and hare population charts after the wolves arrive in year 40. Abundant hares can sustain enough wolves to wipe out the scarcer deer (apparent competition).

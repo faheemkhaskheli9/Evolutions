@@ -1,9 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
 import { templateFileName } from "./engine/userTemplates";
-import type { AlleleInfo, AutosaveInfo, Brush, Catalog, DesignReport, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDesign, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Brush, Catalog, CompareSide, DesignReport, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDesign, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
 import { designFromLibrary, loadDesigns, mergeDesigns, storeDesigns } from "./engine/designs";
 import { SpeciesDesigner } from "./components/SpeciesDesigner";
+import { CompareBranches } from "./components/CompareBranches";
+import type { BranchInfo } from "./engine/branches";
 import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
@@ -94,6 +96,9 @@ export default function App() {
   const [editHistory, setEditHistory] = useState<[number, number]>([0, 0]);
   /** Species designer (PRD FR-S2): the user's designs, and the design being edited. */
   const [myDesigns, setMyDesigns] = useState<SpeciesDesign[]>(loadDesigns);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  /** The comparison view: open, and the histories once they arrive (PRD FR-T7). */
+  const [comparing, setComparing] = useState<{ a: number; b: number; data: { a: CompareSide; b: CompareSide } | null } | null>(null);
   const [designing, setDesigning] = useState<{ initial: SpeciesDesign; withWorld: boolean; onSaved?: (d: SpeciesDesign) => void } | null>(null);
   const checkId = useRef(0);
   const frame = useRef<FrameData>({ mode: "Individual", focus: null });
@@ -234,6 +239,12 @@ export default function App() {
         case "exportedData":
           for (const f of m.files) downloadBlob(f.text, f.name, f.mime);
           if (m.files.length > 1) notify(`Exported ${m.files.length} files.`);
+          break;
+        case "branches":
+          setBranches(m.list);
+          break;
+        case "comparison":
+          setComparing((c) => (c && c.a === m.a.id && c.b === m.b.id ? { ...c, data: { a: m.a, b: m.b } } : c));
           break;
         case "checkpoints":
           setCheckpoints({ list: m.list, bytes: m.bytes, budget: m.budget });
@@ -768,6 +779,17 @@ export default function App() {
             year={status?.year ?? 0}
             disabled={!!progress}
             onRewind={(id) => client.send({ type: "rewind", id })}
+            branches={branches}
+            onBranch={(from) => client.send({ type: "branch", from })}
+            onSwitch={(id) => client.send({ type: "switchBranch", id })}
+            onRename={(id, name) => client.send({ type: "renameBranch", id, name })}
+            onRemove={(id) => client.send({ type: "removeBranch", id })}
+            onCompare={() => {
+              const active = branches.find((b) => b.active)!;
+              const other = branches.find((b) => b.id === active.parent) ?? branches.find((b) => !b.active)!;
+              setComparing({ a: other.id, b: active.id, data: null });
+              client.send({ type: "compare", a: other.id, b: active.id });
+            }}
           />
         )}
       </footer>
@@ -806,6 +828,20 @@ export default function App() {
           designs={myDesigns}
           onDesign={(initial, onSaved) => openDesigner(initial, false, onSaved)}
           onRemoveDesign={removeDesign}
+        />
+      )}
+      {comparing && catalog && (
+        <CompareBranches
+          catalog={catalog}
+          branches={branches}
+          a={comparing.a}
+          b={comparing.b}
+          data={comparing.data}
+          onPick={(a, b) => {
+            setComparing({ a, b, data: null });
+            if (a !== b) client.send({ type: "compare", a, b });
+          }}
+          onClose={() => setComparing(null)}
         />
       )}
       {designing && (

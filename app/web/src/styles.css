@@ -472,6 +472,10 @@ canvas.tool-paint {
 .timeline-mark.mark-start {
   background: var(--accent);
 }
+.timeline-mark.mark-branch {
+  background: var(--macro);
+}
+.timeline-mark.open,
 .timeline-mark:hover,
 .timeline-mark:focus-visible {
   opacity: 1;
@@ -490,6 +494,47 @@ canvas.tool-paint {
   margin-left: -1px;
   background: var(--text);
   pointer-events: none;
+}
+.timeline-menu {
+  position: absolute;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+  white-space: nowrap;
+}
+.branches select {
+  max-width: 180px;
+}
+.compare-dialog {
+  width: min(860px, calc(100vw - 32px));
+}
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.compare-grid h4 {
+  margin: 4px 0;
+}
+.compare-events {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .compare-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .timeline-meta {
   min-width: 80px;

@@ -2,7 +2,7 @@
 // run, thinned to stay within a memory budget.
 
 /** Why a checkpoint was taken. */
-export type CheckpointReason = "start" | "periodic" | "jump" | "intervention";
+export type CheckpointReason = "start" | "periodic" | "jump" | "intervention" | "branch";
 
 /** A checkpoint as the UI sees it (without its bytes). */
 export interface CheckpointInfo {
@@ -95,6 +95,20 @@ export class CheckpointStore {
     const i = this.list.findIndex((c) => c.id === id);
     if (i < 0) return;
     for (const c of this.list.splice(i + 1)) this.total -= c.size;
+  }
+
+  /**
+   * A copy holding the checkpoints up to and including `id` (all of them when `id` is
+   * undefined), for a branch from that point (PRD FR-T7). The bytes are shared, not
+   * copied: checkpoints are never modified once taken.
+   */
+  fork(id?: number): CheckpointStore {
+    const out = new CheckpointStore(this.budget);
+    const i = id === undefined ? this.list.length - 1 : this.list.findIndex((c) => c.id === id);
+    out.list = this.list.slice(0, i + 1);
+    out.total = out.list.reduce((t, c) => t + c.size, 0);
+    out.nextId = this.nextId;
+    return out;
   }
 
   clear() {
