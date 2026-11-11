@@ -341,7 +341,7 @@ try {
     await page.getByText(/Template "Smoke strait" saved/).waitFor();
     await page.getByRole("button", { name: /^Smoke strait/ }).click();
     await page.getByRole("button", { name: "Create world" }).click();
-    await page.getByText("Create a world").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
     await page.waitForFunction((n) => window.__evoLand() === n, strait.land, { timeout: 15000 });
   });
   await step("design a species: impossible designs are refused, possible ones saved", async () => {
@@ -367,7 +367,7 @@ try {
     const last = rows.nth((await rows.count()) - 1);
     if ((await last.inputValue()) !== "my-snow-grazer") throw new Error(`founder row not added: ${await last.inputValue()}`);
     await page.getByRole("button", { name: "Create world" }).click();
-    await page.getByText("Create a world").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
     await page.getByRole("tab", { name: /Chronicle/ }).click();
     await page.getByText(/founders of Snow grazer .* released/).first().waitFor();
   });
