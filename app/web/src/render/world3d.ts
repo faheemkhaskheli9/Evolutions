@@ -597,6 +597,8 @@ export class World3D {
     hydro: Hydrology,
     biome: Float32Array,
     lat: { north: number; south: number; tilt: number },
+    /** Keep the camera where it is (the same world, edited). */
+    keepView = false,
   ) {
     this.w = w;
     this.h = h;
@@ -695,7 +697,7 @@ export class World3D {
     this.sea = sea;
     this.scene.add(sea);
 
-    this.fit();
+    if (!keepView) this.fit();
     this.setFocus(this.focusRect);
   }
 

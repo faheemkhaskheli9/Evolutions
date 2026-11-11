@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type * as THREE from "three";
 import { World3D, type Rect } from "../render/world3d";
 import { buildDemes, buildScalar, buildSnow, buildTerrain } from "./mapLayers";
+import { extendStroke } from "./brush";
+import type { WorldInfo } from "../engine/protocol";
 import type { MapProps } from "./MapView";
 
 interface Props extends MapProps {
@@ -56,13 +58,26 @@ export function WorldView3D(props: Props) {
     };
   }, []);
 
+  // An edit changes the terrain but keeps the world (the same info object): the camera stays.
+  const shownWorld = useRef<WorldInfo | null>(null);
   useEffect(() => {
-    sceneRef.current?.setWorld(world.w, world.h, elevation, water, hydro, biome, {
-      north: world.lat_north,
-      south: world.lat_south,
-      tilt: world.axial_tilt ?? 23.44,
-    });
+    sceneRef.current?.setWorld(
+      world.w,
+      world.h,
+      elevation,
+      water,
+      hydro,
+      biome,
+      {
+        north: world.lat_north,
+        south: world.lat_south,
+        tilt: world.axial_tilt ?? 23.44,
+      },
+      shownWorld.current === world,
+    );
+    shownWorld.current = world;
   }, [world, elevation, water, hydro, biome]);
+  const strokeRef = useRef<[number, number][] | null>(null);
 
   // Rivers are drawn as water in the scene, so the ground under them shows its biome.
   const terrain = useMemo(() => buildTerrain(world, elevation, biome, water, false), [world, elevation, biome, water]);
@@ -137,6 +152,12 @@ export function WorldView3D(props: Props) {
     if (!scene) return;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const orbit = e.button === 2 || e.ctrlKey || e.altKey;
+    if (tool === "paint" && !orbit && !e.shiftKey) {
+      const hit = scene.groundAt(e.clientX, e.clientY);
+      strokeRef.current = [];
+      if (hit) extendStroke(strokeRef.current, hit.x, hit.z, handlers.current.brushRadius);
+      return;
+    }
     const region = !orbit && (e.shiftKey || tool === "focus");
     drag.current = {
       x: e.clientX,
@@ -149,6 +170,11 @@ export function WorldView3D(props: Props) {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (strokeRef.current) {
+      const hit = sceneRef.current?.groundAt(e.clientX, e.clientY);
+      if (hit) extendStroke(strokeRef.current, hit.x, hit.z, handlers.current.brushRadius);
+      return;
+    }
     const d = drag.current;
     const scene = sceneRef.current;
     if (!d || !scene) return;
@@ -182,6 +208,12 @@ export function WorldView3D(props: Props) {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    const stroke = strokeRef.current;
+    if (stroke) {
+      strokeRef.current = null;
+      if (stroke.length) handlers.current.onPaint(stroke);
+      return;
+    }
     const d = drag.current;
     const scene = sceneRef.current;
     drag.current = null;

@@ -21,6 +21,7 @@ fn cli_export_matches_engine_export_for_a_save() {
         founders: None,
         realism: None,
         label: None,
+        edits: vec![],
     })
     .unwrap();
     sim.run_steps(24 * 30);
@@ -73,6 +74,7 @@ fn export_files_have_the_documented_columns() {
         founders: None,
         realism: None,
         label: None,
+        edits: vec![],
     })
     .unwrap();
     sim.run_steps(24);

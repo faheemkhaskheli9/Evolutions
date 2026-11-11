@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Hydrology, WorldInfo } from "../engine/protocol";
 import type { RGB } from "../util";
 import { buildDemes, buildScalar, buildTerrain, worldCopies, type Layer } from "./mapLayers";
+import { extendStroke } from "./brush";
 
 export type { Layer } from "./mapLayers";
-export type Tool = "inspect" | "focus" | "meteor" | "founders";
+export type Tool = "inspect" | "focus" | "meteor" | "founders" | "paint";
 
 export interface FrameData {
   mode: "Individual" | "Population" | "Macro";
@@ -44,6 +45,10 @@ export interface MapProps {
   onPick: (x: number, y: number, radius: number) => void;
   onRegion: (rect: [number, number, number, number]) => void;
   onToolClick: (fx: number, fy: number) => void;
+  /** World-editor brush radius in tiles, while the paint tool is on. */
+  brushRadius: number;
+  /** A finished brush stroke: tile coordinates, x not wrapped. */
+  onPaint: (points: [number, number][]) => void;
 }
 
 export function MapView(props: MapProps) {
@@ -52,6 +57,9 @@ export function MapView(props: MapProps) {
   const view = useRef({ scale: 4, ox: 0, oy: 0, fitted: false });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number; moved: boolean; region: boolean } | null>(null);
   const regionRef = useRef<[number, number, number, number] | null>(null);
+  /** The brush stroke being painted, and the pointer position for the brush outline (unwrapped tiles). */
+  const strokeRef = useRef<[number, number][] | null>(null);
+  const hoverRef = useRef<[number, number] | null>(null);
   const demeCanvas = useRef<HTMLCanvasElement | null>(null);
 
   const terrain = useMemo(() => buildTerrain(world, elevation, biome, water), [world, elevation, biome, water]);
@@ -143,6 +151,26 @@ export function MapView(props: MapProps) {
       ctx.restore();
     };
     if (f.focus) outline(f.focus, "rgba(255,255,255,0.85)", [6, 4]);
+    // World-editor brush: the stroke so far and the brush under the pointer.
+    if (tool === "paint") {
+      const r = props.brushRadius * v.scale;
+      ctx.save();
+      ctx.fillStyle = "rgba(255,213,74,0.25)";
+      for (const [x, y] of strokeRef.current ?? []) {
+        ctx.beginPath();
+        ctx.arc(v.ox + x * v.scale, v.oy + y * v.scale, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const h = hoverRef.current;
+      if (h) {
+        ctx.strokeStyle = "#ffd54a";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(v.ox + h[0] * v.scale, v.oy + h[1] * v.scale, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     if (regionRef.current) outline(regionRef.current, "#ffd54a", []);
     if (selected) {
       for (const k of copies) {
@@ -153,7 +181,7 @@ export function MapView(props: MapProps) {
         ctx.stroke();
       }
     }
-  }, [world, terrain, overlay, frame, speciesColors, selected, layer]);
+  }, [world, terrain, overlay, frame, speciesColors, selected, layer, tool, props.brushRadius]);
 
   // Rebuild the deme overlay when new density arrives.
   useEffect(() => {
@@ -205,8 +233,22 @@ export function MapView(props: MapProps) {
     draw();
   };
 
+  /** Pointer position in tile coordinates, x not wrapped. */
+  const rawTile = (e: React.PointerEvent): [number, number] => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const v = view.current;
+    return [(e.clientX - rect.left - v.ox) / v.scale, (e.clientY - rect.top - v.oy) / v.scale];
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (tool === "paint" && e.button === 0 && !e.shiftKey) {
+      const [x, y] = rawTile(e);
+      strokeRef.current = [];
+      extendStroke(strokeRef.current, x, y, props.brushRadius);
+      draw();
+      return;
+    }
     drag.current = {
       x: e.clientX,
       y: e.clientY,
@@ -218,6 +260,11 @@ export function MapView(props: MapProps) {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (tool === "paint") {
+      hoverRef.current = rawTile(e);
+      if (strokeRef.current) extendStroke(strokeRef.current, hoverRef.current[0], hoverRef.current[1], props.brushRadius);
+      draw();
+    }
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.x;
@@ -244,6 +291,13 @@ export function MapView(props: MapProps) {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    const stroke = strokeRef.current;
+    if (stroke) {
+      strokeRef.current = null;
+      if (stroke.length) props.onPaint(stroke);
+      draw();
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     if (!d) return;
@@ -272,6 +326,10 @@ export function MapView(props: MapProps) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerLeave={() => {
+        hoverRef.current = null;
+        if (tool === "paint") draw();
+      }}
       aria-label="World map. Drag to pan, scroll to zoom, click an animal to inspect it, shift-drag to watch a region."
       role="img"
     />

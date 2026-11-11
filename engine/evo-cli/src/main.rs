@@ -221,6 +221,7 @@ fn main() {
                         Realism::Accelerated
                     }),
                     label: None,
+                    edits: vec![],
                 })
                 .unwrap_or_else(|e| {
                     eprintln!("{e}");

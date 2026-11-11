@@ -18,6 +18,7 @@ All screenshots come from a single run of the Earth-like Continent template, see
 10. [Run until something happens](#10-run-until-something-happens)
 11. [Watch a region in a crowded world](#11-watch-a-region-in-a-crowded-world)
 12. [Change the world (interventions)](#12-change-the-world-interventions)
+    - [Edit the world](#edit-the-world)
 13. [Save, open, resume and replay](#13-save-open-resume-and-replay)
 14. [Keyboard and mouse reference](#14-keyboard-and-mouse-reference)
 15. [Tips for good experiments](#15-tips-for-good-experiments)
@@ -95,6 +96,7 @@ A template keeps a world's starting point: the world settings, seed, mutation ra
 - **Save as template…** (under **Your templates** in the Create dialog) keeps the dialog's current settings. Give it a name and, if you like, a note on what to look for.
 - **Save as template…** in the **World** tab (under **Template**) does the same for the open world, and also downloads the file. It saves how the world was created, not what has happened since.
 - Saved templates are listed under **Your templates**. Click one to fill in its settings; you can still change the seed or founders before creating the world. A world made from it is the same world, animal for animal, as the one the template was saved from, as long as you keep its seed.
+- Edits painted with the world editor at year 0, before time first runs, are part of the template (see [Edit the world](#edit-the-world)); later edits are not.
 - **⤓ Export** downloads the template as a small `.evotemplate` file to send to others. **Import template…** adds a file someone sent you. **✕** removes a template from this browser.
 
 Templates are kept in this browser, like the autosave, so export the ones you want to keep. A file that is damaged, edited to impossible values (such as a count of 0 or a latitude beyond 90°), or made by a newer version of the app is refused with a message saying why. The format is described in the TRD (TR-DA5). The command-line runner reads the same files: `evo run --template-file lesson.evotemplate`.
@@ -371,6 +373,29 @@ Interventions change **conditions only, never genes**. Evolution does the rest. 
 
 ![The Chronicle logging the meteor impact and the organisms it killed](guide/22-meteor-chronicle.png)
 
+### Edit the world
+
+The world editor paints terrain and climate onto the world, so you can build exactly the barrier, island or land bridge an experiment needs: cut a continent in two with a strait and watch the halves diverge, or join two islands and watch species meet.
+
+![The world editor on the flat map: a strait painted across the continent and a mountain ridge beside it, with the brush panel in the World tab](guide/28-edit-world.png)
+
+1. In the **World** tab, click **✎ Edit world**. Time stops; it stays stopped while you edit (pressing play still works, and painting pauses it again).
+2. Pick a brush, a **Size** (radius in tiles; the smallest paints one tile) and a **Strength**.
+3. Drag on the flat map or the 3D world. The brush outline follows the pointer on the flat map. When you let go, the stroke is applied: rivers re-route, lakes fill, and temperature, rainfall, biomes and plant growth follow the new terrain.
+4. **↶ Undo** (Ctrl+Z) and **↷ Redo** (Ctrl+Shift+Z or Ctrl+Y) step through your strokes; undo restores the world exactly as it was. Once time runs again, earlier strokes can no longer be undone (use **Rewind** instead).
+5. Click **✓ Done editing** (or press Esc).
+
+| Brush | What it does |
+|---|---|
+| **▲ Raise / ▼ Lower** | Raises or lowers the ground, up to 1,500 m per stroke at full strength, softer towards the brush edge. Lowering land below sea level makes it sea; raising the sea floor above it makes land. |
+| **Sea** | Makes every tile under the brush sea (10–500 m deep by strength). A one-tile-wide sea is enough to stop animals walking across. |
+| **Land** | Makes every tile under the brush land (20–300 m high by strength): a land bridge or a new island. |
+| **Lake** | Digs a basin that fills with fresh water. Lakes must be inland: a basin open to the sea drains. |
+| **Wetter / Drier** | Adds or removes up to 1,000 mm of rain a year. |
+| **Warmer / Colder** | Changes the local average temperature by up to 10 °C. |
+
+Animals standing where the brush makes sea or a lake drown, and the Chronicle says how many. Each stroke is logged in the Chronicle and in the replay log, so a replay paints the same strokes at the same moments and ends in the same world. Painted rainfall and temperature stay when you later reshape the terrain around them.
+
 At the bottom of the **World** tab, **Deaths so far** breaks down causes of death recorded while animals are simulated individually: starvation, dehydration, predation, old age, heat stroke, cold, accidents, catastrophes and non-viable embryos (failed hybrids). It also shows births, the number of gene variants tracked and the mutation rate in use.
 
 ---
@@ -423,7 +448,8 @@ When the replay ends, a message says whether the world is identical to the origi
 | Input | Action |
 |---|---|
 | **Space** | Play / pause. Ignored while you type in a box, during a jump, or when the key is held down. |
-| **Esc** | Cancel the armed tool (meteor, place species, watch region), even while a box has focus. |
+| **Esc** | Cancel the armed tool (meteor, place species, watch region, world editor), even while a box has focus. |
+| **Ctrl+Z / Ctrl+Shift+Z** (or Ctrl+Y) | Undo or redo a world-editor stroke while the editor is on. |
 | **Scroll** on the map | Zoom in or out at the cursor. |
 | **Drag** on the map | Pan. The world wraps east–west. |
 | **Right-drag**, or **Ctrl / Alt + drag** | Orbit and tilt the 3D world. |
