@@ -54,7 +54,7 @@ const LEGS_B = 3;
 const LEGS_STILL = 4;
 
 /** A small four-legged body, about 1 unit long, standing on y = 0 and facing +x. */
-function animalGeometry() {
+export function animalGeometry() {
   const parts: THREE.BufferGeometry[] = [];
   const body = new THREE.CapsuleGeometry(0.2, 0.45, 3, 8);
   body.rotateZ(Math.PI / 2);
@@ -98,7 +98,7 @@ function simpleAnimalGeometry() {
  * gait). Legs stretch and lift the body; the tail plume grows from the rump with the
  * ornament trait and takes the ornament colour; walking animals swing their legs.
  */
-function shapeAnimals(mat: THREE.Material, time: { value: number }) {
+export function shapeAnimals(mat: THREE.Material, time: { value: number }) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = time;
     sh.vertexShader = sh.vertexShader

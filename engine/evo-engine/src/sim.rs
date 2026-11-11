@@ -3,6 +3,7 @@
 //! (TRD §10, System Design §1.2).
 
 use crate::animal::{Animal, Cause, Sex};
+use crate::designer::SpeciesDesign;
 use crate::genetics::{AlleleTable, Genome, GenomeArch, MutationRates};
 use crate::individual::Grid;
 use crate::params::{Realism, SimParams};
@@ -77,33 +78,29 @@ pub struct NewWorld {
     /// (PRD FR-W3, FR-W9). Applied as if painted at year 0.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edits: Vec<Stroke>,
+    /// Designed species founder groups may use, by key (PRD FR-S2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub designs: Vec<SpeciesDesign>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Intervention {
     /// Global warming (+) or cooling (−), °C. Conditions only; genomes untouched (PRD FR-E6).
-    ClimateShift {
-        delta_c: f32,
-    },
+    ClimateShift { delta_c: f32 },
     /// Impact at (fx, fy) in map fractions; radius as a fraction of map width.
-    Meteor {
-        fx: f32,
-        fy: f32,
-        radius: f32,
-    },
+    Meteor { fx: f32, fy: f32, radius: f32 },
     AddFounders {
         group: FounderGroup,
+        /// The designed species `group.species` names, when it is not a library species
+        /// or a design the world already has (PRD FR-S2).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        design: Option<SpeciesDesign>,
     },
     /// Epidemic killing a fraction of one species.
-    Plague {
-        species: u32,
-        mortality: f32,
-    },
+    Plague { species: u32, mortality: f32 },
     /// A world-editor brush stroke (PRD FR-W3).
-    EditWorld {
-        stroke: Stroke,
-    },
+    EditWorld { stroke: Stroke },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -169,6 +166,11 @@ pub struct Simulation {
     /// Undo and redo for the world editor; not saved.
     #[serde(skip)]
     pub(crate) edit_history: crate::editor::EditHistory,
+    /// Designed species this world knows (PRD FR-S2). Not saved in the state: they are
+    /// in the replay log (the creation settings and `AddFounders` actions), and are
+    /// rebuilt from it on load. `state_hash()` includes them.
+    #[serde(skip)]
+    pub designs: Vec<SpeciesDesign>,
 }
 
 impl Simulation {
@@ -182,8 +184,9 @@ impl Simulation {
         };
         let gen = cfg.gen.unwrap_or_else(|| tmpl.gen.clone());
         validate_gen(&gen)?;
+        crate::designer::validate_designs(&cfg.designs)?;
         if let Some(f) = &cfg.founders {
-            validate_founders(f)?;
+            validate_founders(f, &cfg.designs)?;
         }
         let world = World::generate(gen, cfg.seed);
         let mut params = SimParams::default();
@@ -229,6 +232,7 @@ impl Simulation {
             selection: vec![],
             insight: crate::explain::Insight::new(),
             edit_history: Default::default(),
+            designs: cfg.designs.clone(),
         };
         sim.event(
             EventKind::Info,
@@ -250,7 +254,9 @@ impl Simulation {
                     None,
                     format!(
                         "{} {} will be released in year {:.0}.",
-                        g.count, g.species, g.delay_years
+                        g.count,
+                        sim.species_name(&g.species),
+                        g.delay_years
                     ),
                 );
                 sim.scheduled.push((g.delay_years as f64, g));
@@ -558,27 +564,29 @@ impl Simulation {
 
     /// Releases a founder population (PRD FR-S1/S4). Returns the species id.
     pub fn add_founders(&mut self, g: &FounderGroup) -> Result<u32, String> {
-        let tmpl = species_lib::find(&g.species)
+        let tmpl = self
+            .founder_species(&g.species)
             .ok_or_else(|| format!("unknown species '{}'", g.species))?;
         if g.count == 0 || g.count > 20_000 {
             return Err("founder count must be 1..20000".into());
         }
         // Find habitat before creating anything, so a failed release leaves no phantom species.
-        let tiles = self.founder_tiles(g.region, &tmpl.phenotype_means(), g.count);
+        let means = tmpl.means;
+        let tiles = self.founder_tiles(g.region, &means, g.count);
         if tiles.is_empty() {
             return Err(format!("no suitable habitat found for {}", tmpl.name));
         }
         let weights: Vec<f64> = tiles.iter().map(|t| t.1).collect();
         let arch_id = self.archs.len() as u16;
         let mut rng = Rng::keyed(self.seed, self.minutes, arch_id as u64, stream::FOUNDERS);
-        let spec = tmpl.founder_spec(g.diversity);
+        let spec = species_lib::founder_spec(&means, g.diversity, tmpl.variation);
         let arch = GenomeArch::create(arch_id, &spec, &mut self.alleles, &mut rng);
         self.archs.push(arch);
         let year = self.year();
         let sp = self.species.add(
             arch_id,
             None,
-            tmpl.name.to_string(),
+            tmpl.name.clone(),
             year,
             tmpl.color,
             self.seed,
@@ -594,7 +602,7 @@ impl Simulation {
             let sex = if k % 2 == 0 { Sex::Female } else { Sex::Male };
             let probe = derive(
                 &Phenotype::from_latent(&self.archs[arch_id as usize].base),
-                tmpl.phenotype_means()[0],
+                means[0],
             );
             let age = probe.maturity_days * rng.range_f32(1.0, 2.5);
             let a = self.build_animal(
@@ -1306,8 +1314,17 @@ impl Simulation {
                     format!("Meteor impact! {killed} organisms killed; impact winter (−4 °C for ~8 years)."),
                 );
             }
-            Intervention::AddFounders { group } => {
-                self.add_founders(&group)?;
+            Intervention::AddFounders { group, design } => {
+                let added = match design {
+                    Some(d) => self.register_design(d)?,
+                    None => false,
+                };
+                if let Err(e) = self.add_founders(&group) {
+                    if added {
+                        self.designs.pop();
+                    }
+                    return Err(e);
+                }
             }
             Intervention::EditWorld { stroke } => {
                 stroke.validate(self.world.w, self.world.h)?;
@@ -1516,6 +1533,7 @@ impl Simulation {
                 sim.insight = crate::explain::Insight::deserialize(&mut de)
                     .map_err(|e| corrupt(e.to_string()))?;
             }
+            sim.rebuild_designs().map_err(corrupt)?;
             sim.validate().map_err(corrupt)?;
             sim
         } else {
@@ -1607,7 +1625,11 @@ impl Simulation {
 
     /// Deterministic hash of the simulation state (TRD TR-D7).
     pub fn state_hash(&self) -> u64 {
-        let bytes = bincode::serialize(self).unwrap_or_default();
+        let mut bytes = bincode::serialize(self).unwrap_or_default();
+        // Designs only count when there are any, so worlds without them hash as before.
+        if !self.designs.is_empty() {
+            bytes.extend(bincode::serialize(&self.designs).unwrap_or_default());
+        }
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         for b in bytes {
             h ^= b as u64;
@@ -1651,12 +1673,17 @@ pub fn validate_gen(gen: &WorldGenParams) -> Result<(), String> {
 }
 
 /// Checks founder groups: known species, sizes, diversity, release year and region.
-pub fn validate_founders(founders: &[FounderGroup]) -> Result<(), String> {
+pub fn validate_founders(
+    founders: &[FounderGroup],
+    designs: &[SpeciesDesign],
+) -> Result<(), String> {
     if founders.len() > 64 {
         return Err("at most 64 founder groups".into());
     }
     for g in founders {
-        if crate::species_lib::find(&g.species).is_none() {
+        if crate::species_lib::find(&g.species).is_none()
+            && !designs.iter().any(|d| d.key == g.species)
+        {
             return Err(format!("unknown species '{}'", g.species));
         }
         if g.count == 0 || g.count > 20_000 {

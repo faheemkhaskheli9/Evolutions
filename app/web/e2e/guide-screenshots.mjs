@@ -236,7 +236,21 @@ try {
   await page.getByRole("button", { name: "✓ Done editing" }).click();
   await page.getByRole("radio", { name: "3D world" }).click();
 
-  console.log("10. Resume after reload");
+  console.log("10. Design a species");
+  await page.getByRole("tab", { name: "World" }).click();
+  await page.getByRole("button", { name: "Design…" }).click();
+  await page.getByLabel("Species name").fill("Snow grazer");
+  await page.getByLabel("Species colour").fill("#e8e2d0");
+  await page.getByLabel("Description").fill("A heavier, thick-coated hare for the cold north.");
+  await page.getByLabel("Adult body mass", { exact: true }).fill("480");
+  await page.getByLabel("Insulation (fur/fat)", { exact: true }).fill("900");
+  await page.getByLabel("Appendage size (ears, tail)", { exact: true }).fill("300");
+  await page.getByRole("cell", { name: "This world" }).waitFor();
+  await page.waitForTimeout(1200);
+  await shot("29-species-designer", page.locator(".modal.designer"));
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  console.log("11. Resume after reload");
   await page.waitForTimeout(600);
   await page.reload();
   await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });

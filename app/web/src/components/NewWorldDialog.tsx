@@ -1,6 +1,7 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import { templateConfig, type AutosaveInfo, type Catalog, type FounderGroup, type LandShape, type NewWorldConfig, type StoredTemplate, type WorldGenParams } from "../engine/protocol";
+import { templateConfig, type AutosaveInfo, type Catalog, type FounderGroup, type LandShape, type NewWorldConfig, type SpeciesDesign, type StoredTemplate, type WorldGenParams } from "../engine/protocol";
+import { designsUsed, mergeDesigns } from "../engine/designs";
 import { templateFileName } from "../engine/userTemplates";
 import { downloadBlob, rgb } from "../util";
 import { TemplateForm } from "./TemplateForm";
@@ -20,6 +21,11 @@ interface Props {
   onSaveTemplate: (name: string, description: string, config: NewWorldConfig) => void;
   onImportTemplate: (file: File) => void;
   onRemoveTemplate: (id: string) => void;
+  /** The user's designed species ("My species", PRD FR-S2). */
+  designs: SpeciesDesign[];
+  /** Opens the species designer on a design (null: a new one); `onSaved` gets the result. */
+  onDesign: (initial: SpeciesDesign | null, onSaved: (d: SpeciesDesign) => void) => void;
+  onRemoveDesign: (key: string) => void;
 }
 
 /** The key of a user template in the template picker. */
@@ -99,7 +105,7 @@ function WorldSettings({ gen, set }: { gen: WorldGenParams; set: (patch: Partial
   );
 }
 
-export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore, onClose, busy, templates, onSaveTemplate, onImportTemplate, onRemoveTemplate }: Props) {
+export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore, onClose, busy, templates, onSaveTemplate, onImportTemplate, onRemoveTemplate, designs, onDesign, onRemoveDesign }: Props) {
   const first = catalog.templates[0];
   const [template, setTemplate] = useState(first?.key ?? "earth");
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1e6));
@@ -110,6 +116,8 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
   const [savingTemplate, setSavingTemplate] = useState(false);
 
   const userTemplate = templates.find((t) => userKey(t.id) === template) ?? null;
+  /** Designs founders can use: the user's, and the chosen template's (which win on a shared key). */
+  const available = mergeDesigns(designs, userTemplate?.template.designs ?? []);
   /** Picks a template: a built-in one, "random", or a user template (`user:<id>`). */
   const choose = (key: string) => {
     setTemplate(key);
@@ -134,11 +142,15 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
     gen: customise || userTemplate ? gen : null,
     founders: founders.map((f) => ({ ...f, region: f.region ?? null })),
     label: userTemplate ? userTemplate.template.name : null,
+    edits: userTemplate?.template.edits ?? [],
+    designs: designsUsed(founders, available),
   });
   const latOk = gen.lat_north > gen.lat_south;
 
   const update = (i: number, patch: Partial<FounderGroup>) => setFounders((fs) => fs.map((f, k) => (k === i ? { ...f, ...patch } : f)));
-  const speciesMeta = (key: string) => catalog.species.find((s) => s.key === key);
+  const speciesMeta = (key: string) => catalog.species.find((s) => s.key === key) ?? available.find((d) => d.key === key);
+  /** Founders whose designed species is no longer available. */
+  const missing = founders.filter((f) => !speciesMeta(f.species));
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="nw-title">
@@ -192,7 +204,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
                   }}
                 />
               </label>
-              <button onClick={() => setSavingTemplate(true)} disabled={savingTemplate || founders.length === 0 || (customise && !latOk)} title="Keep these settings as a template you can reuse and share">
+              <button onClick={() => setSavingTemplate(true)} disabled={savingTemplate || founders.length === 0 || missing.length > 0 || (customise && !latOk)} title="Keep these settings as a template you can reuse and share">
                 Save as template…
               </button>
             </span>
@@ -281,11 +293,23 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
                 <td>
                   <i className="swatch" style={{ background: rgb(speciesMeta(f.species)?.color ?? [128, 128, 128]) }} />
                   <select value={f.species} onChange={(e) => update(i, { species: e.target.value })} aria-label="Founder species">
-                    {catalog.species.map((s) => (
-                      <option key={s.key} value={s.key}>
-                        {s.name}
-                      </option>
-                    ))}
+                    {!speciesMeta(f.species) && <option value={f.species}>{f.species} (missing)</option>}
+                    <optgroup label="Library">
+                      {catalog.species.map((s) => (
+                        <option key={s.key} value={s.key}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    {available.length > 0 && (
+                      <optgroup label="My species">
+                        {available.map((d) => (
+                          <option key={d.key} value={d.key}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </td>
                 <td>
@@ -307,11 +331,42 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
           </tbody>
         </table>
         <div className="row between wrap gap">
-          <button className="ghost" onClick={() => setFounders((fs) => [...fs, { species: "hare", count: 200, diversity: 0.8 }])}>
-            + Add species
-          </button>
+          <span className="row gap">
+            <button className="ghost" onClick={() => setFounders((fs) => [...fs, { species: "hare", count: 200, diversity: 0.8 }])}>
+              + Add species
+            </button>
+            <button className="ghost" onClick={() => onDesign(null, (d) => setFounders((fs) => [...fs, { species: d.key, count: 200, diversity: 0.8 }]))} title="Design your own founder species">
+              ✎ Design a species…
+            </button>
+          </span>
           <span className="muted small">Tip: release predators a few decades after their prey so the prey can establish.</span>
         </div>
+        {available.length > 0 && (
+          <div className="my-species" aria-label="My species">
+            <span className="muted small">My species:</span>
+            {available.map((d) => (
+              <span key={d.key} className="chip">
+                <i className="swatch" style={{ background: rgb(d.color) }} />
+                {d.name}
+                <button className="ghost small" onClick={() => onDesign(d, () => undefined)} aria-label={`Edit ${d.name}`} title="Edit in the designer">
+                  ✎
+                </button>
+                {designs.some((e) => e.key === d.key) && (
+                  <button
+                    className="ghost small"
+                    onClick={() => onRemoveDesign(d.key)}
+                    disabled={founders.some((f) => f.species === d.key)}
+                    aria-label={`Remove ${d.name}`}
+                    title={founders.some((f) => f.species === d.key) ? "Used by a founder group" : "Remove from this browser"}
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        {missing.length > 0 && <p className="small error-text">Unknown species: {missing.map((f) => f.species).join(", ")}. Choose another species or remove the group.</p>}
         <div className="row between wrap gap footer">
           <label className="ghost file">
             Open a saved world…
@@ -327,7 +382,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
           </label>
           <button
             className="primary"
-            disabled={busy || founders.length === 0 || (customise && !latOk)}
+            disabled={busy || founders.length === 0 || missing.length > 0 || (customise && !latOk)}
             onClick={() => onCreate(config())}
           >
             {busy ? "Generating…" : "Create world"}

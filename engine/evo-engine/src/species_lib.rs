@@ -43,23 +43,34 @@ impl SpeciesTemplate {
     /// Founder specification on the latent scale with typical variation:
     /// CV ≈ 8% for log-scale traits, latent SD 0.25 for bounded (0–1) traits.
     pub fn founder_spec(&self, diversity: f32) -> FounderSpec {
-        let means = self.phenotype_means();
-        let mut latent_mean = [0f32; N_TRAITS];
-        let mut latent_sd = [0f32; N_TRAITS];
-        for t in Trait::ALL {
-            let i = t as usize;
-            latent_mean[i] = t.to_latent(means[i]);
-            latent_sd[i] = match t.info().transform {
+        founder_spec(&self.phenotype_means(), diversity, 1.0)
+    }
+}
+
+/// Phenotype means for traits a species leaves unset.
+pub fn default_means() -> [f32; N_TRAITS] {
+    defaults()
+}
+
+/// Founder specification for phenotype `means`, with the library's standing variation
+/// scaled by `variation` (1 = the library's).
+pub fn founder_spec(means: &[f32; N_TRAITS], diversity: f32, variation: f32) -> FounderSpec {
+    let mut latent_mean = [0f32; N_TRAITS];
+    let mut latent_sd = [0f32; N_TRAITS];
+    for t in Trait::ALL {
+        let i = t as usize;
+        latent_mean[i] = t.to_latent(means[i]);
+        latent_sd[i] = variation
+            * match t.info().transform {
                 crate::traits::Transform::Exp => t.latent_sd(means[i], 0.08 * means[i]),
                 // Constant on the logistic scale: ±0.06 near 0.5, much narrower near the bounds.
                 crate::traits::Transform::Logistic => 0.25,
             };
-        }
-        FounderSpec {
-            latent_mean,
-            latent_sd,
-            diversity,
-        }
+    }
+    FounderSpec {
+        latent_mean,
+        latent_sd,
+        diversity,
     }
 }
 

@@ -222,6 +222,7 @@ fn main() {
                     }),
                     label: None,
                     edits: vec![],
+                    designs: vec![],
                 })
                 .unwrap_or_else(|e| {
                     eprintln!("{e}");

@@ -2,11 +2,11 @@
 // Engine host: owns the WASM simulation, runs the time loop, and streams frames
 // to the UI (System Design §5 and §7).
 
-import init, { Engine, ReplayRun, check_template, make_template } from "../wasm/evo_wasm.js";
+import init, { Engine, ReplayRun, check_design, check_template, make_template } from "../wasm/evo_wasm.js";
 import { Autosaver, readAutosave, writeAutosave } from "./autosave";
 import { listTemplates, removeTemplate, storeTemplate } from "./userTemplates";
 import { CheckpointStore, compress, decompress, type CheckpointReason } from "./checkpoints";
-import { exportFiles, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
+import { exportFiles, type DesignReport, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
 import { smoothSpeed } from "../util";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -642,6 +642,16 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         const cp = checkpoints.before(m.event);
         if (cp) void rewind(cp.id);
         else post({ type: "notice", message: "No checkpoint from before that event is kept." });
+        break;
+      }
+      case "checkDesign": {
+        const json = JSON.stringify(m.design);
+        try {
+          const text = m.world && engine ? engine.check_design(json) : check_design(json);
+          post({ type: "designReport", id: m.id, report: JSON.parse(text) as DesignReport });
+        } catch (e) {
+          post({ type: "designReport", id: m.id, report: null, error: e instanceof Error ? e.message : String(e) });
+        }
         break;
       }
       case "hash":

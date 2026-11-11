@@ -162,6 +162,7 @@ mod tests {
             realism: None,
             label: None,
             edits: vec![],
+            designs: vec![],
         })
         .unwrap()
     }

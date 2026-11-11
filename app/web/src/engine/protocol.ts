@@ -41,6 +41,63 @@ export interface NewWorldConfig {
   label?: string | null;
   /** World-editor strokes painted at year 0 (from a user template). */
   edits?: Stroke[];
+  /** Designed species the founders use (PRD FR-S2). */
+  designs?: SpeciesDesign[];
+}
+
+/** A designed founder species (PRD FR-S2); mirrors the engine's `SpeciesDesign`. */
+export interface SpeciesDesign {
+  /** Used by founder groups; never a library species' key. */
+  key: string;
+  name: string;
+  description?: string;
+  color: [number, number, number];
+  /** Adult phenotype means by trait key. */
+  traits: Record<string, number>;
+  /** Founder variation relative to a library species' (1 = the same), 0.1–3. */
+  variation: number;
+}
+
+/** One finding of the species designer's checks (PRD FR-S3). */
+export interface DesignProblem {
+  level: "Error" | "Warning" | "Note";
+  check: string;
+  trait_key?: string;
+  message: string;
+}
+
+/** Values derived from a design, from the engine's physiology. */
+export interface DesignPreview {
+  mass_kg: number;
+  bmr_w: number;
+  brain_share: number;
+  fmr_kj_day: number;
+  breeding_kj_day: number;
+  intake_kj_day: number;
+  energy_margin: number;
+  top_speed_kmh: number;
+  cruise_kmh: number;
+  water_l_day: number;
+  gestation_days: number;
+  weaning_days: number;
+  maturity_days: number;
+  lifespan_years: number;
+  newborn_kg: number;
+  litters_per_year: number;
+  lifetime_young: number;
+  t_min_c: number;
+  t_max_c: number;
+  plant_efficiency: number;
+  meat_efficiency: number;
+  roughage_use: number;
+  perception_km: number;
+  habitable_land?: number;
+}
+
+export interface DesignReport {
+  ok: boolean;
+  problems: DesignProblem[];
+  preview: DesignPreview;
 }
 
 /** World-editor brushes (PRD FR-W3); mirrors the engine's `Brush`. */
@@ -70,6 +127,8 @@ export interface UserTemplate {
   founders: FounderGroup[];
   /** World-editor strokes painted at year 0 (format 2). */
   edits?: Stroke[];
+  /** Designed species the founders use (format 3). */
+  designs?: SpeciesDesign[];
 }
 
 /** A user template kept in the browser. `text` is the file, as the engine wrote it. */
@@ -82,14 +141,27 @@ export interface StoredTemplate {
 
 /** The settings to create a world from a user template. */
 export function templateConfig(t: UserTemplate): NewWorldConfig {
-  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name, edits: t.edits ?? [] };
+  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name, edits: t.edits ?? [], designs: t.designs ?? [] };
+}
+
+export interface TraitMeta {
+  key: string;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  log: boolean;
+  default: number;
+  class: "Morphology" | "LifeHistory" | "Behaviour";
 }
 
 export interface Catalog {
   templates: { key: string; name: string; description: string; founders: FounderGroup[]; gen: WorldGenParams }[];
   default_gen: WorldGenParams;
-  species: { key: string; name: string; description: string; color: [number, number, number] }[];
-  traits: { key: string; label: string; unit: string }[];
+  /** Library species, with their adult trait values by trait key. */
+  species: { key: string; name: string; description: string; color: [number, number, number]; traits: Record<string, number> }[];
+  /** Traits, with the range a design may use; `log` traits are best shown on a log scale. */
+  traits: TraitMeta[];
   biomes: string[];
 }
 
@@ -115,6 +187,8 @@ export interface WorldInfo {
   template_key: string;
   seed: number;
   patch_size: number;
+  /** Designed species this world knows. */
+  designs?: SpeciesDesign[];
 }
 
 export interface Status {
@@ -305,6 +379,8 @@ export type ToWorker =
   | { type: "edit"; stroke: Stroke }
   | { type: "undoEdit" }
   | { type: "redoEdit" }
+  /** Checks a designed species; against the current world when `world` is set and there is one. */
+  | { type: "checkDesign"; id: number; design: SpeciesDesign; world: boolean }
   | { type: "pause" }
   | { type: "speed"; simSecondsPerSecond: number }
   | { type: "mode"; mode: ModeChoice }
@@ -399,6 +475,7 @@ export type FromWorker =
   /** The checkpoints kept for rewind, oldest first, and their total size in bytes. */
   | { type: "checkpoints"; list: CheckpointInfo[]; bytes: number; budget: number }
   | { type: "hash"; year: number; hash: string }
+  | { type: "designReport"; id: number; report: DesignReport | null; error?: string }
   | { type: "notice"; message: string }
   | { type: "error"; message: string };
 

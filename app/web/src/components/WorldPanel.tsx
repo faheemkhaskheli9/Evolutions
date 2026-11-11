@@ -1,6 +1,6 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import type { AlleleInfo, Brush, Catalog, ExportKind, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
+import type { AlleleInfo, Brush, Catalog, ExportKind, ModeChoice, SpeciesDesign, SpeciesInfo, Status } from "../engine/protocol";
 import { BRUSHES } from "./brush";
 import { ALLELE_RAMP } from "../util";
 import { TemplateForm } from "./TemplateForm";
@@ -36,6 +36,11 @@ interface Props {
   modeChoice: ModeChoice;
   setMode: (m: ModeChoice) => void;
   apply: (iv: Record<string, unknown>) => void;
+  /** Releases the chosen founders where they will do best. */
+  onAddFounders: () => void;
+  /** Designed species that can be introduced (PRD FR-S2). */
+  designs: SpeciesDesign[];
+  onDesignSpecies: () => void;
   founderSpecies: string;
   setFounderSpecies: (s: string) => void;
   founderCount: number;
@@ -239,17 +244,31 @@ export function WorldPanel(p: Props) {
         <span>Introduce species</span>
         <div className="row wrap">
           <select value={p.founderSpecies} onChange={(e) => p.setFounderSpecies(e.target.value)} aria-label="Species to introduce">
-            {p.catalog.species.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.name}
-              </option>
-            ))}
+            <optgroup label="Library">
+              {p.catalog.species.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.name}
+                </option>
+              ))}
+            </optgroup>
+            {p.designs.length > 0 && (
+              <optgroup label="My species">
+                {p.designs.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <NumberInput min={2} max={5000} value={p.founderCount} onChange={p.setFounderCount} aria-label="Founder count" />
           <button className={p.tool === "founders" ? "active" : ""} onClick={() => p.setTool(p.tool === "founders" ? "inspect" : "founders")}>
             {p.tool === "founders" ? "Click the map…" : "Place"}
           </button>
-          <button onClick={() => p.apply({ kind: "AddFounders", group: { species: p.founderSpecies, count: p.founderCount, diversity: 0.8, region: null } })}>Best habitat</button>
+          <button onClick={p.onAddFounders}>Best habitat</button>
+          <button className="ghost" onClick={p.onDesignSpecies} title="Design your own species, checked against this world">
+            Design…
+          </button>
         </div>
       </div>
       <div className="iv">

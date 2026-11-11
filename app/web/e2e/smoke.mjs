@@ -40,7 +40,7 @@ const step = async (name, fn) => {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await step("engine loads and shows the new-world dialog", async () => {
-    await page.getByText("Create a world").waitFor({ timeout: 20000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ timeout: 20000 });
   });
   await step("customise world settings", async () => {
     await page.getByRole("button", { name: /Earth-like Continent/ }).click();
@@ -250,6 +250,7 @@ try {
     await page.getByText(/identical to the original run/).waitFor({ timeout: 300000 });
   });
   let templateFile;
+  let strait;
   await step("save the world as a template", async () => {
     await page.getByRole("tab", { name: "World" }).click();
     await page.getByRole("button", { name: "Save as template…" }).click();
@@ -274,7 +275,7 @@ try {
   });
   await step("a template survives a reload and recreates its world", async () => {
     await page.reload();
-    await page.getByText("Create a world").waitFor({ timeout: 20000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ timeout: 20000 });
     const seed = JSON.parse(readFileSync(templateFile, "utf8")).seed;
     // Importing the downloaded file again keeps one copy.
     await page.getByLabel("Import template").setInputFiles(templateFile);
@@ -290,7 +291,7 @@ try {
     await page.getByRole("button", { name: /Earth-like Continent/ }).click();
     await page.getByLabel("Seed", { exact: true }).fill(String(seed));
     await page.getByRole("button", { name: "Create world" }).click();
-    await page.getByText("Create a world").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
     const direct = await page.evaluate(() => window.__evoHash());
     if (fromTemplate.year !== 0 || fromTemplate.hash !== direct.hash) throw new Error(`template world differs: ${JSON.stringify([fromTemplate, direct])}`);
   });
@@ -332,6 +333,60 @@ try {
     const t = JSON.parse(readFileSync(file, "utf8"));
     if (t.version !== 2 || t.edits?.length !== 1 || t.edits[0].brush !== "Ocean") throw new Error(`template lacks the edit: ${JSON.stringify(t.edits)}`);
     console.log(`(land ${before} → ${after} tiles) `);
+    strait = { file, land: after };
+  });
+  await step("a template with edits recreates the painted world", async () => {
+    await page.getByRole("button", { name: "New world" }).click();
+    await page.getByLabel("Import template").setInputFiles(strait.file);
+    await page.getByText(/Template "Smoke strait" saved/).waitFor();
+    await page.getByRole("button", { name: /^Smoke strait/ }).click();
+    await page.getByRole("button", { name: "Create world" }).click();
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
+    await page.waitForFunction((n) => window.__evoLand() === n, strait.land, { timeout: 15000 });
+  });
+  await step("design a species: impossible designs are refused, possible ones saved", async () => {
+    await page.getByRole("button", { name: "New world" }).click();
+    await page.getByRole("button", { name: /Earth-like Continent/ }).click();
+    await page.getByRole("button", { name: "✎ Design a species…" }).click();
+    await page.getByLabel("Species name").fill("Snow grazer");
+    // Every costly trait at its maximum: the energy budget cannot balance.
+    for (const l of ["Relative brain size (EQ)", "Somatic maintenance", "Insulation (fur/fat)", "Ornament size", "Sensory acuity", "Muscle: sprint vs endurance", "Kidney concentrating ability", "Evaporative cooling capacity"])
+      await page.getByLabel(l, { exact: true }).fill("1000");
+    await page.getByText(/Rejected: Impossible energy budget/).waitFor();
+    if (await page.getByRole("button", { name: "Save species" }).isEnabled()) throw new Error("an impossible design can be saved");
+    await page.getByText(/Can't save: Impossible energy budget/).waitFor();
+    // Back to hare values, with a thick coat and a bigger body: possible.
+    await page.getByLabel("Start from").selectOption({ label: "Steppe hare" });
+    await page.getByLabel("Insulation (fur/fat)", { exact: true }).fill("900");
+    await page.getByLabel("Adult body mass", { exact: true }).fill("400");
+    await page.getByText(/Rejected/).waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Save species" }).click();
+    await page.getByRole("dialog", { name: "Design a species" }).waitFor({ state: "detached" });
+    // The new species is added as a founder group.
+    const rows = page.getByLabel("Founder species");
+    const last = rows.nth((await rows.count()) - 1);
+    if ((await last.inputValue()) !== "my-snow-grazer") throw new Error(`founder row not added: ${await last.inputValue()}`);
+    await page.getByRole("button", { name: "Create world" }).click();
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
+    await page.getByRole("tab", { name: /Chronicle/ }).click();
+    await page.getByText(/founders of Snow grazer .* released/).first().waitFor();
+  });
+  await step("a designed species travels in templates and can be introduced later", async () => {
+    await page.getByRole("tab", { name: "World" }).click();
+    await page.getByRole("button", { name: "Save as template…" }).click();
+    await page.getByLabel("Template name").fill("Snow lesson");
+    const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save template" }).click()]);
+    const file = join(tmpdir(), `evo-template-design-${process.pid}.evotemplate`);
+    await d.saveAs(file);
+    const t = JSON.parse(readFileSync(file, "utf8"));
+    if (t.version !== 3 || t.designs?.length !== 1 || t.designs[0].name !== "Snow grazer" || !(t.designs[0].traits.insulation > 0.85)) throw new Error(`template lacks the design: ${JSON.stringify(t.designs)}`);
+    // Introduce it again, where it will do best.
+    await page.getByLabel("Species to introduce").selectOption({ label: "Snow grazer" });
+    await page.getByRole("button", { name: "Best habitat" }).click();
+    await page.getByRole("tab", { name: /Chronicle/ }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll(".ev")].filter((e) => /founders of Snow grazer/.test(e.textContent ?? "")).length >= 2, null, { timeout: 15000 });
+    // The world, saved and opened again, still knows the design.
+    await page.getByRole("tab", { name: "World" }).click();
   });
   const fatal = errors.filter((e) => !/favicon/.test(e));
   if (fatal.length) throw new Error(`page errors:\n${fatal.join("\n")}`);
