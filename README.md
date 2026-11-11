@@ -56,6 +56,7 @@ npm run dev           # open the printed URL
 
 In the app:
 - Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons. **Save as template…** keeps your settings to reuse or share as a `.evotemplate` file.
+- **✎ Design a species…** (Create dialog, or **Design…** in the World tab) builds your own founder species from trait sliders, with a 3D preview and live checks that use the simulation's physiology: designs that cannot balance their energy budget, breed or keep warm are refused with the reason, and risky ones are warned. Designed species travel in saves, replays and templates.
 - **✎ Edit world** (World tab) paints mountains, seas, straits, land bridges, lakes, rainfall and temperature onto the world, with undo; rivers, climate and biomes follow the new terrain.
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
@@ -113,6 +114,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | V-P2 Transitions | Population ↔ Macro switches conserve every deme exactly (TRD TR-X4 asks for ±5% abundance, ±0.1 SD traits); Individual ↔ Macro conserves abundance |
 | Macro mode | Deterministic, saves mid-run; the cold-adaptation cline forms in 5/5 seeds (V-B1) and populations across a strait become separate species within 65,000 years (V-S1) |
 | User templates | A world made from an exported template has the same state hash as the world it came from, for built-in, random and customised worlds; tampered files are rejected |
+| Species designer | A design with an impossible energy budget is refused with the reason, in the designer, new worlds and interventions; a design made of a library species' values gives the same world as that species; designs survive saves, replays and templates; every library species passes the checks |
 | World editor | A one-patch-wide painted strait cuts land connectivity and rivers re-route; undo restores the exact previous hash; a replay with edits ends in the same state; a template keeps edits painted at year 0 |
 | "Why?": drift or selection | For traits nothing selects on, change ÷ expected drift SD has mean square ≈ 1 over 120 tests; in a small Blank Slate population those changes are reported as drift; in Ice Age, hares' insulation rise is reported as selection by cold stress |
 

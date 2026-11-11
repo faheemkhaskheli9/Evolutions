@@ -15,7 +15,7 @@
 //! use evo_engine::{NewWorld, Simulation};
 //! let mut sim = Simulation::new(NewWorld {
 //!     template: "blank".into(), seed: 1, gen: None, founders: None, realism: None,
-//!     label: None, edits: vec![],
+//!     label: None, edits: vec![], designs: vec![],
 //! }).unwrap();
 //! sim.run_steps(24);
 //! assert!(sim.population() > 0);
@@ -25,6 +25,7 @@
 
 pub mod animal;
 pub mod api;
+pub mod designer;
 pub mod editor;
 pub mod explain;
 pub mod export;
@@ -47,6 +48,7 @@ pub mod traits;
 pub mod user_template;
 pub mod world;
 
+pub use designer::SpeciesDesign;
 pub use params::{Realism, SimParams};
 pub use replay::{Replay, ReplayScript};
 pub use sim::{Intervention, Mode, NewWorld, Simulation};

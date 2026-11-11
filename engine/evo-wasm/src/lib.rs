@@ -1,7 +1,9 @@
 //! WebAssembly bindings: the browser app drives the engine from a Web Worker
 //! through this API (System Design §7). Queries return JSON strings or typed arrays.
 
-use evo_engine::{Intervention, Mode, NewWorld, Replay, ReplayScript, Simulation, UserTemplate};
+use evo_engine::{
+    Intervention, Mode, NewWorld, Replay, ReplayScript, Simulation, SpeciesDesign, UserTemplate,
+};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -27,6 +29,14 @@ pub fn make_template(config_json: &str, name: &str, description: &str) -> Result
 #[wasm_bindgen]
 pub fn check_template(text: &str) -> Result<String, JsError> {
     Ok(UserTemplate::parse(text).map_err(err)?.to_json())
+}
+
+/// Checks a designed species without a world (PRD FR-S2, FR-S3): JSON
+/// `{ok, problems: [{level, check, trait_key?, message}], preview}`.
+#[wasm_bindgen]
+pub fn check_design(design_json: &str) -> Result<String, JsError> {
+    let d: SpeciesDesign = serde_json::from_str(design_json).map_err(err)?;
+    serde_json::to_string(&d.report(None)).map_err(err)
 }
 
 /// A replay in progress: run it in slices with `advance`, then take the world with `finish`.
@@ -185,6 +195,18 @@ impl Engine {
     pub fn edit_history(&self) -> Vec<u32> {
         let (u, r) = self.sim.edit_history_len();
         vec![u as u32, r as u32]
+    }
+
+    /// Checks a designed species against this world, as `check_design` but also saying
+    /// how much of the world it could live in.
+    pub fn check_design(&self, design_json: &str) -> Result<String, JsError> {
+        let d: SpeciesDesign = serde_json::from_str(design_json).map_err(err)?;
+        serde_json::to_string(&self.sim.design_report(&d)).map_err(err)
+    }
+
+    /// Designed species this world knows, as JSON.
+    pub fn designs(&self) -> String {
+        serde_json::to_string(&self.sim.designs).unwrap_or_default()
     }
 
     pub fn status(&self) -> String {

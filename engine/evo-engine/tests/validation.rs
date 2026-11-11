@@ -324,6 +324,7 @@ fn blank(seed: u64) -> Simulation {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap()
 }
@@ -498,6 +499,7 @@ fn gradient_world(seed: u64, founders: Vec<FounderGroup>) -> Simulation {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap()
 }
@@ -572,6 +574,7 @@ fn v_s1_allopatric_speciation() {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     // Raise the sea in a vertical band to split the world in two.
@@ -736,6 +739,7 @@ fn custom_world_settings_apply_and_are_validated() {
             realism: None,
             label: None,
             edits: vec![],
+            designs: vec![],
         })
     };
     let gen = WorldGenParams {
@@ -827,6 +831,7 @@ fn bad_world_settings_are_rejected() {
             realism: None,
             label: None,
             edits: vec![],
+            designs: vec![],
         })
     };
     assert!(make(&|g| {
@@ -874,6 +879,7 @@ fn river_and_lake_layers_are_consistent() {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     let water = s.layer("water");
@@ -979,6 +985,7 @@ fn replay_log_reproduces_the_run() {
             region: None,
             delay_years: 0.0,
         },
+        design: None,
     })
     .unwrap();
     s.run_steps(30);
@@ -1100,6 +1107,7 @@ fn fst_world(strait: bool) -> Simulation {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     if strait {
@@ -1161,6 +1169,7 @@ fn why_insulation_rises_from_cold_in_the_ice_age() {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     s.set_mode(Mode::Population).unwrap();
@@ -1191,6 +1200,7 @@ fn why_insulation_event_names_cold_stress() {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     s.run_years(1.0);
@@ -1229,6 +1239,7 @@ fn why_neutral_trait_change_is_drift_in_a_small_population() {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     s.params.habitat_m2_per_tile = 100.0;
@@ -1286,6 +1297,7 @@ fn drift_test_is_calibrated_on_neutral_traits() {
             realism: None,
             label: None,
             edits: vec![],
+            designs: vec![],
         })
         .unwrap();
         s.params.habitat_m2_per_tile = 100.0;
@@ -1578,6 +1590,7 @@ fn fst_world_split(seed: u64) -> Simulation {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     let w = s.world.w;
@@ -1621,6 +1634,7 @@ fn macro_mode_runs_a_million_years_on_earth_in_ten_minutes() {
         realism: None,
         label: None,
         edits: vec![],
+        designs: vec![],
     })
     .unwrap();
     s.set_mode(Mode::Population).unwrap();
@@ -1673,6 +1687,7 @@ fn user_template_recreates_the_world() {
         realism: Some(Realism::Strict),
         label: None,
         edits: vec![],
+        designs: vec![],
     };
     let worlds = [
         ("island_dwarfism", None),
@@ -1688,6 +1703,7 @@ fn user_template_recreates_the_world() {
             realism: None,
             label: None,
             edits: vec![],
+            designs: vec![],
         });
         let original = Simulation::new(cfg).unwrap();
         let file = original

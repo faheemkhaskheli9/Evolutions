@@ -28,12 +28,18 @@ impl Simulation {
                 "founders": t.founders, "gen": t.gen,
             })).collect::<Vec<_>>(),
             "default_gen": crate::world::WorldGenParams::default(),
-            "species": species_lib::library().iter().map(|s| json!({
+            "species": species_lib::library().iter().map(|s| { let m = s.phenotype_means(); json!({
                 "key": s.key, "name": s.name, "description": s.description,
                 "color": s.color,
-            })).collect::<Vec<_>>(),
-            "traits": Trait::ALL.iter().map(|t| { let i = t.info(); json!({
+                "traits": Trait::ALL.iter().map(|t| (t.info().key.to_string(), json!(m[*t as usize]))).collect::<serde_json::Map<_, _>>(),
+            })}).collect::<Vec<_>>(),
+            "traits": Trait::ALL.iter().map(|t| { let i = t.info(); let log = i.transform == crate::traits::Transform::Exp; json!({
                 "key": i.key, "label": i.label, "unit": i.unit,
+                // The range a design may use: bounded traits stay inside 0.01–0.99.
+                "min": if log { i.lo } else { 0.01 }, "max": if log { i.hi } else { 0.99 },
+                "log": log,
+                "default": species_lib::default_means()[*t as usize],
+                "class": format!("{:?}", i.class),
             })}).collect::<Vec<_>>(),
             "biomes": Biome::ALL.iter().map(|b| b.props().name).collect::<Vec<_>>(),
         })
@@ -48,6 +54,7 @@ impl Simulation {
             "template": self.display_name(), "template_key": self.template_key,
             "seed": self.seed,
             "patch_size": self.params.patch_size,
+            "designs": self.designs,
         })
     }
 

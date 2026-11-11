@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
 import { templateFileName } from "./engine/userTemplates";
-import type { AlleleInfo, AutosaveInfo, Brush, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Brush, Catalog, DesignReport, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDesign, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
+import { designFromLibrary, loadDesigns, mergeDesigns, storeDesigns } from "./engine/designs";
+import { SpeciesDesigner } from "./components/SpeciesDesigner";
 import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
@@ -90,6 +92,10 @@ export default function App() {
   const [brushRadius, setBrushRadius] = useState(2);
   const [brushStrength, setBrushStrength] = useState(0.5);
   const [editHistory, setEditHistory] = useState<[number, number]>([0, 0]);
+  /** Species designer (PRD FR-S2): the user's designs, and the design being edited. */
+  const [myDesigns, setMyDesigns] = useState<SpeciesDesign[]>(loadDesigns);
+  const [designing, setDesigning] = useState<{ initial: SpeciesDesign; withWorld: boolean; onSaved?: (d: SpeciesDesign) => void } | null>(null);
+  const checkId = useRef(0);
   const frame = useRef<FrameData>({ mode: "Individual", focus: null });
   const [frameVersion, setFrameVersion] = useState(0);
   const noticeId = useRef(0);
@@ -399,6 +405,44 @@ export default function App() {
     }
   };
   const apply = (iv: Record<string, unknown>) => client.send({ type: "apply", intervention: iv });
+  /** Designs founders can be released as in this world: the world's own, then the user's. */
+  const worldDesigns = mergeDesigns(myDesigns, world?.info.designs ?? []);
+  /** Releases founders; a designed species travels with them. */
+  const addFounders = (region: [number, number, number] | null) =>
+    apply({ kind: "AddFounders", group: { species: founderSpecies, count: founderCount, diversity: 0.8, region }, design: worldDesigns.find((d) => d.key === founderSpecies) });
+  const checkDesign = useCallback(
+    (design: SpeciesDesign, withWorld: boolean) =>
+      new Promise<DesignReport>((resolve, reject) => {
+        const id = ++checkId.current;
+        const off = client.on((m) => {
+          if (m.type !== "designReport" || m.id !== id) return;
+          off();
+          if (m.report) resolve(m.report);
+          else reject(new Error(m.error ?? "The design could not be checked."));
+        });
+        client.send({ type: "checkDesign", id, design, world: withWorld });
+      }),
+    [client],
+  );
+  const checkWithWorld = useCallback((d: SpeciesDesign) => checkDesign(d, true), [checkDesign]);
+  const checkAlone = useCallback((d: SpeciesDesign) => checkDesign(d, false), [checkDesign]);
+  /** Opens the designer on `initial`, or on a new design copied from the hare. */
+  const openDesigner = (initial: SpeciesDesign | null, withWorld: boolean, onSaved?: (d: SpeciesDesign) => void) => {
+    if (!catalog) return;
+    setDesigning({ initial: initial ?? designFromLibrary(catalog, "hare", myDesigns.map((d) => d.key)), withWorld, onSaved });
+  };
+  const saveDesign = (d: SpeciesDesign) => {
+    const next = mergeDesigns(myDesigns, [d]);
+    setMyDesigns(next);
+    storeDesigns(next);
+    designing?.onSaved?.(d);
+    setDesigning(null);
+  };
+  const removeDesign = (key: string) => {
+    const next = myDesigns.filter((d) => d.key !== key);
+    setMyDesigns(next);
+    storeDesigns(next);
+  };
   const selected = inspectData && !inspectData.gone && typeof inspectData.x === "number" ? { x: inspectData.x as number, y: inspectData.y as number } : null;
 
   const mapProps = world && {
@@ -425,7 +469,7 @@ export default function App() {
       client.send({ type: "edit", stroke: { brush, radius: brushRadius, strength: brushStrength, points: strokePoints(points, world.info.w, world.info.h) } }),
     onToolClick: (fx: number, fy: number) => {
       if (tool === "meteor") apply({ kind: "Meteor", fx, fy, radius: 0.06 });
-      if (tool === "founders") apply({ kind: "AddFounders", group: { species: founderSpecies, count: founderCount, diversity: 0.8, region: [fx, fy, 0.04] } });
+      if (tool === "founders") addFounders([fx, fy, 0.04]);
       setTool("inspect");
     },
   };
@@ -661,6 +705,13 @@ export default function App() {
                 modeChoice={modeChoice}
                 setMode={(m) => client.send({ type: "mode", mode: m })}
                 apply={apply}
+                onAddFounders={() => addFounders(null)}
+                designs={worldDesigns}
+                onDesignSpecies={() =>
+                  openDesigner(null, true, (d) => {
+                    setFounderSpecies(d.key);
+                  })
+                }
                 founderSpecies={founderSpecies}
                 setFounderSpecies={setFounderSpecies}
                 founderCount={founderCount}
@@ -752,6 +803,20 @@ export default function App() {
           onSaveTemplate={(name, description, config) => client.send({ type: "saveTemplate", name, description, config })}
           onImportTemplate={(file) => void importTemplate(file)}
           onRemoveTemplate={(id) => client.send({ type: "removeTemplate", id })}
+          designs={myDesigns}
+          onDesign={(initial, onSaved) => openDesigner(initial, false, onSaved)}
+          onRemoveDesign={removeDesign}
+        />
+      )}
+      {designing && (
+        <SpeciesDesigner
+          catalog={catalog}
+          initial={designing.initial}
+          designs={myDesigns}
+          check={designing.withWorld && world ? checkWithWorld : checkAlone}
+          withWorld={designing.withWorld && !!world}
+          onSave={saveDesign}
+          onCancel={() => setDesigning(null)}
         />
       )}
     </div>

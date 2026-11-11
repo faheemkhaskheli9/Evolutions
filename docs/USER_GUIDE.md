@@ -7,6 +7,7 @@ All screenshots come from a single run of the Earth-like Continent template, see
 **Contents**
 
 1. [Create a world](#1-create-a-world)
+    - [Design a species](#design-a-species)
 2. [The main screen](#2-the-main-screen)
 3. [Watch individual animals](#3-watch-individual-animals)
 4. [Control time](#4-control-time)
@@ -67,6 +68,34 @@ The founder table decides which species start the world:
 - **Diversity:** genetic variation among the founders. Low values model a bottleneck, such as a handful of castaways reaching an island.
 - **Release in year:** when they appear. Predators do best released a few decades after their prey.
 - **✕** removes a row, and **+ Add species** adds one.
+- **✎ Design a species…** opens the species designer (below) and adds the species you design as a new row.
+
+### Design a species
+
+The species designer makes a founder species of your own, such as "a small cold-adapted grazer", to test ideas the library does not cover.
+
+![The species designer: trait sliders grouped into body, life history and behaviour, a turning 3D body, the checks, and the values derived from the design](guide/29-species-designer.png)
+
+1. Click **✎ Design a species…** under the founder table (or **Design…** next to **Introduce species** in the World tab). The designer opens with the steppe hare's values.
+2. Give the species a **Name** and a **Colour**. **Start from** copies the values of a library species or of one of your own, and keeps the name.
+3. Move the sliders. They set the founders' average adult traits: body (mass, insulation, legs, diet, brain and so on), life history (litter size, pace of life, maintenance, breeding season) and behaviour. Body mass uses a log scale, from 10 g to 6 t.
+4. **Founder variation** sets how much the founders differ from each other: 1 is as much as a library species. More variation gives selection more to work with; the **Diversity** column in the founder table still sets how many different alleles they carry.
+5. Watch the right-hand side as you go. It shows the body in 3D (legs, tail plume and coat as in the 3D world), and values worked out with the same physiology the simulation uses: the daily energy budget, resting metabolism and the brain's share of it, top speed, water need, the air temperatures it is comfortable in, gestation, maturity, lifespan, young per lifetime, and how well it digests plants and meat. Opened from the World tab, it also says how much of the current world's land stays within its temperature limits all year.
+6. Click **Save species**. The species is kept in this browser under **My species**, and can be picked in the founder table and in **Introduce species**.
+
+The designer checks every change:
+
+| Check | Refused when | Warned when |
+|---|---|---|
+| **Energy budget** | Field metabolism (2.5 × resting, which includes the cost of brain, insulation, ornaments and other costly traits) plus breeding needs more than its gut can process. | Less than 10% to spare: it will likely starve whenever food is short. |
+| **Breeding** | Growing a litter during gestation needs more energy than it has to spare, it dies of old age before its first young are born, or a female has fewer than 2 young in her lifetime. | Fewer than 4 young in a lifetime. |
+| **Brain cost** | — | The brain uses more than 12% of resting energy. |
+| **Thermal limits** | No air temperature lets it keep its body temperature. | A comfort range narrower than 15 °C; or, against a world, little or no land stays within its limits all year ("will likely die out here"). |
+| **Diet** | — | Notes only: plant-eaters under about 3.5 kg cannot digest coarse forage (Jarman–Bell), and mixed diets digest both foods less well. |
+
+A refused design shows **Rejected** with the reason, the slider concerned is marked in red (amber for a warning), and **Save species** stays disabled until you fix it. Every library species passes these checks.
+
+A design made of a library species' values behaves exactly like that species, animal for animal. Designed species travel with the world: they are in its save file and replay log, and a template saved from the world includes the ones its founders use, so whoever opens the template gets them too. Under **My species** in the Create dialog, **✎** edits a design and **✕** removes it from this browser (not from worlds that already use it).
 
 ### Customise world settings
 
@@ -97,6 +126,7 @@ A template keeps a world's starting point: the world settings, seed, mutation ra
 - **Save as template…** in the **World** tab (under **Template**) does the same for the open world, and also downloads the file. It saves how the world was created, not what has happened since.
 - Saved templates are listed under **Your templates**. Click one to fill in its settings; you can still change the seed or founders before creating the world. A world made from it is the same world, animal for animal, as the one the template was saved from, as long as you keep its seed.
 - Edits painted with the world editor at year 0, before time first runs, are part of the template (see [Edit the world](#edit-the-world)); later edits are not.
+- Designed species the founders use are part of the template (see [Design a species](#design-a-species)).
 - **⤓ Export** downloads the template as a small `.evotemplate` file to send to others. **Import template…** adds a file someone sent you. **✕** removes a template from this browser.
 
 Templates are kept in this browser, like the autosave, so export the ones you want to keep. A file that is damaged, edited to impossible values (such as a count of 0 or a latitude beyond 90°), or made by a newer version of the app is refused with a message saying why. The format is described in the TRD (TR-DA5). The command-line runner reads the same files: `evo run --template-file lesson.evotemplate`.
@@ -366,7 +396,7 @@ Interventions change **conditions only, never genes**. Evolution does the rest. 
 |---|---|---|
 | **Climate** | Click **−5 °C**, **−2 °C**, **+2 °C** or **+5 °C**. | Shifts global temperature. Biomes, plant growth and heat or cold stress change; watch insulation, body size and ranges respond. The current offset is shown below the buttons. |
 | **Meteor impact** | Click **Arm meteor**, then click the map. | Kills nearly everything within the blast radius, strips vegetation, and causes an impact winter (−4 °C for about 8 years). |
-| **Introduce species** | Pick a species and a count, then **Place** (and click the map) or **Best habitat**. | Releases new founders. Good for invasive-species or predator-reintroduction experiments. If there is no suitable habitat where you click (open ocean, for example), the app says so and nothing is added. |
+| **Introduce species** | Pick a species and a count, then **Place** (and click the map) or **Best habitat**. **Design…** makes a new species, checked against this world (see [Design a species](#design-a-species)). | Releases new founders. Good for invasive-species or predator-reintroduction experiments. If there is no suitable habitat where you click (open ocean, for example), the app says so and nothing is added. |
 | **Epidemic** | Pick a species and a mortality %, then **Strike**. | Kills that share of the species, creating a bottleneck. Watch genetic diversity drop. |
 
 ![After a meteor strike: a dark gap in the population density map where the impact killed everything](guide/21-meteor.png)
