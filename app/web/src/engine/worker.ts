@@ -161,18 +161,29 @@ async function rewind(id: number) {
 }
 
 /** `fresh`: a new history (a new, opened or replayed world) rather than a rewind. */
+function terrain(e: Engine) {
+  return {
+    world: JSON.parse(e.world_info()),
+    elevation: e.layer("elevation"),
+    biome: e.layer("biome"),
+    water: e.layer("water"),
+    hydro: { flow: e.layer("river_flow"), downstream: e.layer("downstream"), level: e.layer("water_level") },
+  };
+}
+
+/** After a world edit, undo or redo: the new terrain, and a full frame. */
+function sendTerrain() {
+  if (!engine) return;
+  post({ type: "terrain", ...terrain(engine) });
+  precip = engine.layer("precip");
+  snowDay = NaN;
+  autosaver.dirty = true;
+  sendFrame(true);
+}
+
 function sendCreated(fresh = true) {
   if (!engine) return;
-  post(
-    {
-      type: "created",
-      world: JSON.parse(engine.world_info()),
-      elevation: engine.layer("elevation"),
-      biome: engine.layer("biome"),
-      water: engine.layer("water"),
-      hydro: { flow: engine.layer("river_flow"), downstream: engine.layer("downstream"), level: engine.layer("water_level") },
-    },
-  );
+  post({ type: "created", ...terrain(engine) });
   precip = engine.layer("precip");
   snowDay = NaN;
   lastForagePost = 0;
@@ -201,6 +212,7 @@ function sendFrame(full = false) {
     modeChoice,
     achievedSpeed: achieved,
     capExceeded,
+    editHistory: Array.from(engine.edit_history()) as [number, number],
     events,
   };
   const transfer: Transferable[] = [];
@@ -554,6 +566,18 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         engine.apply(JSON.stringify(m.intervention));
         autosaver.dirty = true;
         sendFrame(true);
+        break;
+      case "edit":
+        if (!engine || jumping) break;
+        playing = false;
+        engine.edit_world(JSON.stringify(m.stroke));
+        sendTerrain();
+        break;
+      case "undoEdit":
+        if (engine && !jumping && engine.undo_edit()) sendTerrain();
+        break;
+      case "redoEdit":
+        if (engine && !jumping && engine.redo_edit()) sendTerrain();
         break;
       case "pick":
         if (engine) post({ type: "picked", id: engine.pick(m.x, m.y, m.radius) });

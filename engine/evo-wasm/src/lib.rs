@@ -164,6 +164,29 @@ impl Engine {
         self.sim.apply(iv).map_err(err)
     }
 
+    /// Paints a world-editor stroke given as JSON (`{"brush":"Ocean","radius":1,
+    /// "strength":0.5,"points":[[x,y],...]}`), with undo (PRD FR-W3).
+    pub fn edit_world(&mut self, stroke_json: &str) -> Result<(), JsError> {
+        let stroke: evo_engine::Stroke = serde_json::from_str(stroke_json).map_err(err)?;
+        self.sim.edit_world(stroke).map_err(err)
+    }
+
+    /// Undoes the last world edit; false when there is nothing to undo.
+    pub fn undo_edit(&mut self) -> Result<bool, JsError> {
+        self.sim.undo_edit().map_err(err)
+    }
+
+    /// Redoes the last undone world edit; false when there is nothing to redo.
+    pub fn redo_edit(&mut self) -> Result<bool, JsError> {
+        self.sim.redo_edit().map_err(err)
+    }
+
+    /// How many world edits can be undone and redone now: `[undo, redo]`.
+    pub fn edit_history(&self) -> Vec<u32> {
+        let (u, r) = self.sim.edit_history_len();
+        vec![u as u32, r as u32]
+    }
+
     pub fn status(&self) -> String {
         self.sim.status().to_string()
     }

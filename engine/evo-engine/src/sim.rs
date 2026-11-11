@@ -15,7 +15,7 @@ use crate::species::SpeciesRegistry;
 use crate::species_lib;
 use crate::templates::{self, FounderGroup};
 use crate::traits::{Phenotype, Trait, N_TRAITS};
-use crate::world::{World, WorldGenParams};
+use crate::world::{Stroke, World, WorldGenParams};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -73,6 +73,10 @@ pub struct NewWorld {
     /// the replay log, not the state, so it does not change `state_hash()`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// World-editor strokes applied once the world is created, from a user template
+    /// (PRD FR-W3, FR-W9). Applied as if painted at year 0.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<Stroke>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,6 +99,10 @@ pub enum Intervention {
     Plague {
         species: u32,
         mortality: f32,
+    },
+    /// A world-editor brush stroke (PRD FR-W3).
+    EditWorld {
+        stroke: Stroke,
     },
 }
 
@@ -158,6 +166,9 @@ pub struct Simulation {
     /// `popgen` and, like it, not part of `state_hash()`.
     #[serde(skip)]
     pub insight: crate::explain::Insight,
+    /// Undo and redo for the world editor; not saved.
+    #[serde(skip)]
+    pub(crate) edit_history: crate::editor::EditHistory,
 }
 
 impl Simulation {
@@ -217,6 +228,7 @@ impl Simulation {
             popgen: Default::default(),
             selection: vec![],
             insight: crate::explain::Insight::new(),
+            edit_history: Default::default(),
         };
         sim.event(
             EventKind::Info,
@@ -247,6 +259,9 @@ impl Simulation {
             }
         }
         sim.record_metrics();
+        for stroke in cfg.edits {
+            sim.apply_inner(Intervention::EditWorld { stroke })?;
+        }
         Ok(sim)
     }
 
@@ -1224,7 +1239,7 @@ impl Simulation {
         Ok(())
     }
 
-    fn apply_inner(&mut self, iv: Intervention) -> Result<(), String> {
+    pub(crate) fn apply_inner(&mut self, iv: Intervention) -> Result<(), String> {
         match iv {
             Intervention::ClimateShift { delta_c } => {
                 if !(-15.0..=15.0).contains(&delta_c) {
@@ -1293,6 +1308,56 @@ impl Simulation {
             }
             Intervention::AddFounders { group } => {
                 self.add_founders(&group)?;
+            }
+            Intervention::EditWorld { stroke } => {
+                stroke.validate(self.world.w, self.world.h)?;
+                let r = self.world.apply_stroke(&stroke);
+                // Animals on tiles that became sea or lake drown, and demes in patches
+                // with no land left are lost.
+                let mut flooded = vec![false; self.world.w * self.world.h];
+                for &i in &r.flooded {
+                    flooded[i] = true;
+                }
+                let mut drowned = 0u64;
+                if !r.flooded.is_empty() {
+                    for i in 0..self.animals.len() {
+                        let a = &self.animals[i];
+                        if a.alive && flooded[self.world.tile_of(a.x, a.y)] {
+                            self.kill(i, Cause::Catastrophe);
+                            drowned += 1;
+                        }
+                    }
+                    self.animals.retain(|a| a.alive);
+                    let mut land = vec![0u32; self.patches_w() * self.patches_h()];
+                    for i in (0..self.world.w * self.world.h).filter(|&i| self.world.is_land(i)) {
+                        land[self.patch_of_tile(i) as usize] += 1;
+                    }
+                    let mut rng = Rng::keyed(self.seed, self.minutes, 1, stream::EVENTS);
+                    for d in self.demes.iter_mut().chain(self.frozen.iter_mut()) {
+                        if land[d.patch as usize] == 0 {
+                            drowned += d.cull(1.0, &mut rng);
+                        }
+                    }
+                    self.demes.retain(|d| d.total() > 0);
+                    self.frozen.retain(|d| d.total() > 0);
+                }
+                let land = self.world.land_tiles();
+                let total = self.world.w * self.world.h;
+                self.event(
+                    EventKind::Intervention,
+                    None,
+                    format!(
+                        "World edited: {} over {} tiles ({:.0}% land now){}.",
+                        stroke.brush.verb(),
+                        r.tiles,
+                        100.0 * land as f64 / total as f64,
+                        if drowned > 0 {
+                            format!("; {drowned} organisms drowned")
+                        } else {
+                            String::new()
+                        }
+                    ),
+                );
             }
             Intervention::Plague { species, mortality } => {
                 let name = self

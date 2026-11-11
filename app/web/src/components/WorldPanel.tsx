@@ -1,6 +1,7 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import type { AlleleInfo, Catalog, ExportKind, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
+import type { AlleleInfo, Brush, Catalog, ExportKind, ModeChoice, SpeciesInfo, Status } from "../engine/protocol";
+import { BRUSHES } from "./brush";
 import { ALLELE_RAMP } from "../util";
 import { TemplateForm } from "./TemplateForm";
 import type { Layer, Tool } from "./MapView";
@@ -21,6 +22,17 @@ interface Props {
   setAlleleUid: (uid: number) => void;
   tool: Tool;
   setTool: (t: Tool) => void;
+  /** World editor (PRD FR-W3). */
+  brush: Brush;
+  setBrush: (b: Brush) => void;
+  brushRadius: number;
+  setBrushRadius: (r: number) => void;
+  brushStrength: number;
+  setBrushStrength: (s: number) => void;
+  /** Edits that can be undone and redone now. */
+  editHistory: [number, number];
+  onUndoEdit: () => void;
+  onRedoEdit: () => void;
   modeChoice: ModeChoice;
   setMode: (m: ModeChoice) => void;
   apply: (iv: Record<string, unknown>) => void;
@@ -158,6 +170,49 @@ export function WorldPanel(p: Props) {
           ⬚ Watch region
         </button>
       </div>
+
+      <h3>Edit world</h3>
+      <p className="muted small">
+        Paint mountains, seas, straits, land bridges, lakes and climate. Time stops while you edit; rivers, climate and biomes follow the new terrain. Animals in
+        new water drown. Edits are part of the replay log, and edits made at year 0 are kept in templates.
+      </p>
+      <div className="row wrap">
+        <button
+          className={p.tool === "paint" ? "active" : ""}
+          aria-pressed={p.tool === "paint"}
+          disabled={!p.status || p.busy}
+          onClick={() => p.setTool(p.tool === "paint" ? "inspect" : "paint")}
+        >
+          {p.tool === "paint" ? "✓ Done editing" : "✎ Edit world"}
+        </button>
+        <button disabled={p.editHistory[0] === 0} onClick={p.onUndoEdit} title="Undo the last stroke (Ctrl+Z)">
+          ↶ Undo
+        </button>
+        <button disabled={p.editHistory[1] === 0} onClick={p.onRedoEdit} title="Redo (Ctrl+Shift+Z)">
+          ↷ Redo
+        </button>
+      </div>
+      {p.tool === "paint" && (
+        <div className="editor">
+          <div className="chips" role="radiogroup" aria-label="Brush">
+            {BRUSHES.map((b) => (
+              <button key={b.key} role="radio" aria-checked={p.brush === b.key} className={`chip ${p.brush === b.key ? "active" : ""}`} title={b.title} onClick={() => p.setBrush(b.key)}>
+                {b.label}
+              </button>
+            ))}
+          </div>
+          <label className="slider">
+            <span>Size</span>
+            <input type="range" min={0.5} max={12} step={0.5} value={p.brushRadius} onChange={(e) => p.setBrushRadius(Number(e.target.value))} aria-label="Brush size" />
+            <span className="muted small">{p.brushRadius <= 0.5 ? "1 tile" : `${p.brushRadius} tiles`}</span>
+          </label>
+          <label className="slider">
+            <span>Strength</span>
+            <input type="range" min={0.05} max={1} step={0.05} value={p.brushStrength} onChange={(e) => p.setBrushStrength(Number(e.target.value))} aria-label="Brush strength" />
+            <span className="muted small">{Math.round(p.brushStrength * 100)}%</span>
+          </label>
+        </div>
+      )}
 
       <h3>Change the world</h3>
       <p className="muted small">Interventions change conditions, never genes. Evolution does the rest.</p>

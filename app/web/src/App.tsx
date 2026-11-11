@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
 import { templateFileName } from "./engine/userTemplates";
-import type { AlleleInfo, AutosaveInfo, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Brush, Catalog, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
 import { inspectReply } from "./engine/protocol";
 import { MapView, type FrameData, type Layer, type Tool } from "./components/MapView";
 import { SpeciesPanel } from "./components/SpeciesPanel";
@@ -11,6 +11,7 @@ import { chartTarget } from "./components/why";
 import { Inspector } from "./components/Inspector";
 import { WorldPanel } from "./components/WorldPanel";
 import { NewWorldDialog } from "./components/NewWorldDialog";
+import { strokePoints } from "./components/brush";
 import { RunUntil } from "./components/RunUntil";
 import { Timeline } from "./components/Timeline";
 import type { CheckpointInfo } from "./engine/checkpoints";
@@ -84,6 +85,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [founderSpecies, setFounderSpecies] = useState("hare");
   const [founderCount, setFounderCount] = useState(100);
+  /** World editor (PRD FR-W3): the brush, and the edits that can be undone and redone. */
+  const [brush, setBrush] = useState<Brush>("Ocean");
+  const [brushRadius, setBrushRadius] = useState(2);
+  const [brushStrength, setBrushStrength] = useState(0.5);
+  const [editHistory, setEditHistory] = useState<[number, number]>([0, 0]);
   const frame = useRef<FrameData>({ mode: "Individual", focus: null });
   const [frameVersion, setFrameVersion] = useState(0);
   const noticeId = useRef(0);
@@ -131,7 +137,12 @@ export default function App() {
           setAlleleUid(null);
           setAlleles({});
           break;
+        case "terrain":
+          // The same world, edited: keep its info object so the views keep their camera.
+          setWorld((w) => w && { ...w, elevation: m.elevation, biome: m.biome, water: m.water, hydro: m.hydro });
+          break;
         case "frame": {
+          setEditHistory(m.editHistory);
           const f = frame.current;
           f.mode = m.status.mode;
           f.focus = m.status.focus;
@@ -240,6 +251,11 @@ export default function App() {
     };
   }, [client, notify]);
 
+  // Test hook: land tiles on the map as shown (the end-to-end test paints a sea).
+  useEffect(() => {
+    (window as unknown as { __evoLand: unknown }).__evoLand = () => (world ? world.water.reduce((n, v) => (v === 1 ? n : n + 1), 0) : null);
+  }, [world]);
+
   // Test hook: the state hash, to check that a rewound run repeats the original.
   useEffect(() => {
     (window as unknown as { __evoHash: unknown }).__evoHash = () =>
@@ -335,6 +351,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (showNew) return;
       if (e.key === "Escape") setTool("inspect");
+      if (tool === "paint" && (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
+        e.preventDefault();
+        client.send({ type: e.key === "y" || e.shiftKey ? "redoEdit" : "undoEdit" });
+        return;
+      }
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === "Space") {
         e.preventDefault();
@@ -343,7 +364,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, showNew, world, progress]);
+  }, [togglePlay, showNew, world, progress, tool, client]);
 
   const speciesColors = useMemo(() => new Map<number, RGB>(species.map((s) => [s.id, s.color])), [species]);
   const create = (cfg: NewWorldConfig) => {
@@ -399,6 +420,9 @@ export default function App() {
       setTool("inspect");
       client.send({ type: "focus", rect });
     },
+    brushRadius,
+    onPaint: (points: [number, number][]) =>
+      client.send({ type: "edit", stroke: { brush, radius: brushRadius, strength: brushStrength, points: strokePoints(points, world.info.w, world.info.h) } }),
     onToolClick: (fx: number, fy: number) => {
       if (tool === "meteor") apply({ kind: "Meteor", fx, fy, radius: 0.06 });
       if (tool === "founders") apply({ kind: "AddFounders", group: { species: founderSpecies, count: founderCount, diversity: 0.8, region: [fx, fy, 0.04] } });
@@ -520,7 +544,11 @@ export default function App() {
               individually.
             </div>
           )}
-          {tool !== "inspect" && <div className="map-hint tool">{tool === "focus" ? "Drag a box to watch that region individually." : "Click on the map."} Esc to cancel.</div>}
+          {tool !== "inspect" && <div className="map-hint tool">{tool === "focus"
+                ? "Drag a box to watch that region individually. Esc to cancel."
+                : tool === "paint"
+                  ? "Drag on the map to paint. Ctrl+Z undoes. Esc when done."
+                  : "Click on the map. Esc to cancel."}</div>}
           <div className="legend" aria-hidden>
             {species
               .filter((s) => s.extinct_year === null)
@@ -616,7 +644,20 @@ export default function App() {
                 alleleUid={alleleUid}
                 setAlleleUid={setAlleleUid}
                 tool={tool}
-                setTool={setTool}
+                setTool={(t) => {
+                  // Editing happens with time stopped (PRD FR-W3).
+                  if (t === "paint" && playing) client.send({ type: "pause" });
+                  setTool(t);
+                }}
+                brush={brush}
+                setBrush={setBrush}
+                brushRadius={brushRadius}
+                setBrushRadius={setBrushRadius}
+                brushStrength={brushStrength}
+                setBrushStrength={setBrushStrength}
+                editHistory={editHistory}
+                onUndoEdit={() => client.send({ type: "undoEdit" })}
+                onRedoEdit={() => client.send({ type: "redoEdit" })}
                 modeChoice={modeChoice}
                 setMode={(m) => client.send({ type: "mode", mode: m })}
                 apply={apply}

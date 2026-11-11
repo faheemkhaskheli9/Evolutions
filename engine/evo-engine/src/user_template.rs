@@ -22,17 +22,24 @@
 //! `base` is the built-in template the world is named after ("random" for a random
 //! world). `gen` and `founders` are complete, so a template does not depend on the
 //! built-in template's settings, which may change between versions.
+//!
+//! Version 2 adds `edits`: the world-editor strokes painted at year 0 (PRD FR-W3), in
+//! order. A template without edits is still written as version 1, so older versions
+//! of the app can open it.
 
 use crate::params::Realism;
 use crate::sim::{validate_founders, validate_gen, NewWorld, Simulation};
 use crate::templates::{self, FounderGroup};
-use crate::world::WorldGenParams;
+use crate::world::{Stroke, WorldGenParams};
 use serde::{Deserialize, Serialize};
 
 /// Marks a template file.
 pub const TEMPLATE_FORMAT: &str = "evolutions-template";
-/// The template format version this engine writes and reads.
-pub const TEMPLATE_VERSION: u32 = 1;
+/// The newest template format version this engine reads (and writes for templates
+/// with edits).
+pub const TEMPLATE_VERSION: u32 = 2;
+/// Most editor strokes a template may hold.
+pub const MAX_EDITS: usize = 500;
 /// Longest name, in characters.
 pub const MAX_NAME: usize = 80;
 /// Longest description, in characters.
@@ -41,7 +48,7 @@ pub const MAX_DESCRIPTION: usize = 2000;
 /// so a template survives the web app unchanged.
 pub const MAX_SEED: u64 = (1 << 53) - 1;
 /// Largest template file accepted, in bytes.
-pub const MAX_BYTES: usize = 256 * 1024;
+pub const MAX_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +63,8 @@ pub struct UserTemplate {
     pub realism: Realism,
     pub gen: WorldGenParams,
     pub founders: Vec<FounderGroup>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<Stroke>,
 }
 
 impl UserTemplate {
@@ -75,7 +84,7 @@ impl UserTemplate {
         };
         let t = UserTemplate {
             format: TEMPLATE_FORMAT.into(),
-            version: TEMPLATE_VERSION,
+            version: if cfg.edits.is_empty() { 1 } else { 2 },
             name: name.trim().into(),
             description: description.trim().into(),
             base: cfg.template.clone(),
@@ -85,6 +94,7 @@ impl UserTemplate {
                 .unwrap_or(crate::params::SimParams::default().realism),
             gen: cfg.gen.clone().unwrap_or(base.gen),
             founders: cfg.founders.clone().unwrap_or(base.founders),
+            edits: cfg.edits.clone(),
         };
         t.validate()?;
         Ok(t)
@@ -105,7 +115,7 @@ impl UserTemplate {
             return Err("not a template: this file is not an Evolutions template".into());
         }
         match v.get("version").and_then(|n| n.as_u64()) {
-            Some(n) if n == TEMPLATE_VERSION as u64 => {}
+            Some(n) if (1..=TEMPLATE_VERSION as u64).contains(&n) => {}
             Some(n) if n > TEMPLATE_VERSION as u64 => {
                 return Err(format!(
                     "this template was made by a newer version of Evolutions (template format {n}); update the app to open it"
@@ -122,7 +132,7 @@ impl UserTemplate {
     /// The same checks as for new-world settings (PRD FR-W1), plus the name and seed.
     pub fn validate(&self) -> Result<(), String> {
         let bad = |m: String| Err(format!("invalid template: {m}"));
-        if self.format != TEMPLATE_FORMAT || self.version != TEMPLATE_VERSION {
+        if self.format != TEMPLATE_FORMAT || !(1..=TEMPLATE_VERSION).contains(&self.version) {
             return bad("unknown format or version".into());
         }
         let name = self.name.trim();
@@ -155,6 +165,16 @@ impl UserTemplate {
             return bad("it has no founders".into());
         }
         validate_founders(&self.founders).or_else(bad)?;
+        if !self.edits.is_empty() && self.version < 2 {
+            return bad("world edits need template format 2".into());
+        }
+        if self.edits.len() > MAX_EDITS {
+            return bad(format!("it has more than {MAX_EDITS} world edits"));
+        }
+        for s in &self.edits {
+            s.validate(self.gen.width, self.gen.height)
+                .or_else(|m| bad(format!("world edit: {m}")))?;
+        }
         Ok(())
     }
 
@@ -168,6 +188,7 @@ impl UserTemplate {
             founders: Some(self.founders.clone()),
             realism: Some(self.realism),
             label: Some(self.name.trim().to_string()),
+            edits: self.edits.clone(),
         }
     }
 
@@ -190,8 +211,30 @@ impl Simulation {
             founders: origin.founders.clone(),
             realism: Some(self.params.realism),
             label: None,
+            edits: self.creation_edits(),
         };
         UserTemplate::from_new_world(&cfg, name, description)
+    }
+
+    /// World-editor strokes painted at year 0, in order: those the world was created
+    /// with and those painted before time first ran. Later edits are part of what
+    /// happened since, not of how the world was created.
+    pub fn creation_edits(&self) -> Vec<Stroke> {
+        let mut edits = self
+            .replay
+            .origin
+            .as_ref()
+            .map(|o| o.edits.clone())
+            .unwrap_or_default();
+        edits.extend(self.replay.entries.iter().filter_map(|e| match &e.action {
+            crate::replay::Action::Intervention(crate::sim::Intervention::EditWorld { stroke })
+                if e.minutes == 0 =>
+            {
+                Some(stroke.clone())
+            }
+            _ => None,
+        }));
+        edits
     }
 
     /// The name to show for the world: its user template's, else the built-in template's.
@@ -216,6 +259,7 @@ mod tests {
             founders: None,
             realism: None,
             label: None,
+            edits: vec![],
         }
     }
 
@@ -257,7 +301,7 @@ mod tests {
         assert!(UserTemplate::parse("{}")
             .unwrap_err()
             .contains("not an Evolutions template"));
-        assert!(edit(&|v| v["version"] = 2.into()).contains("newer version"));
+        assert!(edit(&|v| v["version"] = 3.into()).contains("newer version"));
         assert!(edit(&|v| v["name"] = "  ".into()).contains("name is empty"));
         assert!(edit(&|v| v["base"] = "mars".into()).contains("unknown base"));
         assert!(edit(&|v| v["gen"]["width"] = 2.into()).contains("world size"));

@@ -192,7 +192,7 @@ try {
   console.log("8. Interventions");
   await page.getByRole("radio", { name: "Population" }).click();
   await page.waitForTimeout(800);
-  await page.locator(".tab-content").evaluate((el) => (el.scrollTop = 380));
+  await page.getByRole("heading", { name: "Change the world" }).evaluate((el) => el.scrollIntoView({ block: "start" }));
   await noToasts();
   await shot("20-interventions", page.locator(".side"));
   await page.getByRole("button", { name: "Population density" }).click();
@@ -208,7 +208,35 @@ try {
   await page.locator(".tab-content").evaluate((el) => (el.scrollTop = 0));
   await shot("22-meteor-chronicle", page.locator(".side"));
 
-  console.log("9. Resume after reload");
+  console.log("9. Edit the world");
+  await page.getByRole("tab", { name: "World" }).click();
+  await page.getByRole("button", { name: "✎ Edit world" }).click();
+  await page.getByRole("radio", { name: "Flat map" }).click();
+  await page.waitForTimeout(500);
+  const e = await mapBox();
+  // A strait across the continent, then a mountain ridge beside it.
+  for (const [brush, size, [fx0, fy0, fx1, fy1]] of [
+    ["Sea", "1.5", [0.62, 0.3, 0.62, 0.85]],
+    ["▲ Raise", "3", [0.68, 0.45, 0.8, 0.7]],
+    ["▲ Raise", "3", [0.69, 0.45, 0.81, 0.7]],
+  ]) {
+    await page.getByRole("radio", { name: brush }).click();
+    await page.getByLabel("Brush size").fill(size);
+    await page.getByLabel("Brush strength").fill("1");
+    await page.mouse.move(e.x + e.width * fx0, e.y + e.height * fy0);
+    await page.mouse.down();
+    await page.mouse.move(e.x + e.width * fx1, e.y + e.height * fy1, { steps: 14 });
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+  }
+  await page.getByRole("heading", { name: "Edit world" }).evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.mouse.move(e.x + e.width * 0.6, e.y + e.height * 0.45);
+  await noToasts();
+  await shot("28-edit-world");
+  await page.getByRole("button", { name: "✓ Done editing" }).click();
+  await page.getByRole("radio", { name: "3D world" }).click();
+
+  console.log("10. Resume after reload");
   await page.waitForTimeout(600);
   await page.reload();
   await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });

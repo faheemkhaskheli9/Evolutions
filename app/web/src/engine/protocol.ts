@@ -39,6 +39,21 @@ export interface NewWorldConfig {
   realism?: "Strict" | "Accelerated";
   /** The user template's name, when the world is made from one. */
   label?: string | null;
+  /** World-editor strokes painted at year 0 (from a user template). */
+  edits?: Stroke[];
+}
+
+/** World-editor brushes (PRD FR-W3); mirrors the engine's `Brush`. */
+export type Brush = "Raise" | "Lower" | "Ocean" | "Land" | "Lake" | "Wetter" | "Drier" | "Warmer" | "Colder";
+
+/** One brush stroke: the brush dragged through `points` (tile coordinates). */
+export interface Stroke {
+  brush: Brush;
+  /** Radius in tiles, from tile centres (0.5 paints one tile). */
+  radius: number;
+  /** 0–1. */
+  strength: number;
+  points: [number, number][];
 }
 
 /** A user template file (`.evotemplate`, PRD FR-W9); mirrors the engine's `UserTemplate`. */
@@ -53,6 +68,8 @@ export interface UserTemplate {
   realism: "Strict" | "Accelerated";
   gen: WorldGenParams;
   founders: FounderGroup[];
+  /** World-editor strokes painted at year 0 (format 2). */
+  edits?: Stroke[];
 }
 
 /** A user template kept in the browser. `text` is the file, as the engine wrote it. */
@@ -65,7 +82,7 @@ export interface StoredTemplate {
 
 /** The settings to create a world from a user template. */
 export function templateConfig(t: UserTemplate): NewWorldConfig {
-  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name };
+  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name, edits: t.edits ?? [] };
 }
 
 export interface Catalog {
@@ -284,6 +301,10 @@ export type ToWorker =
   | { type: "load"; bytes: ArrayBuffer }
   | { type: "restore" }
   | { type: "play" }
+  /** Paints a world-editor stroke (pauses time first). */
+  | { type: "edit"; stroke: Stroke }
+  | { type: "undoEdit" }
+  | { type: "redoEdit" }
   | { type: "pause" }
   | { type: "speed"; simSecondsPerSecond: number }
   | { type: "mode"; mode: ModeChoice }
@@ -334,6 +355,8 @@ export interface FrameMsg {
   modeChoice: ModeChoice;
   achievedSpeed: number;
   capExceeded: boolean;
+  /** World edits that can be undone and redone now. */
+  editHistory: [number, number];
   positions?: Float32Array;
   species?: Uint32Array;
   actions?: Uint8Array;
@@ -356,6 +379,8 @@ export type FromWorker =
   /** The user templates after a change; `added` is the one just saved or imported. */
   | { type: "templates"; list: StoredTemplate[]; added?: StoredTemplate; download?: boolean }
   | { type: "created"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array; hydro: Hydrology }
+  /** The terrain after a world edit, undo or redo (the world is otherwise the same one). */
+  | { type: "terrain"; world: WorldInfo; elevation: Float32Array; biome: Float32Array; water: Float32Array; hydro: Hydrology }
   | FrameMsg
   /** Long-running work: a jump, or a replay (`title` names it; a jump has none). */
   | { type: "progress"; done: number; total: number; label: string; title?: string }
