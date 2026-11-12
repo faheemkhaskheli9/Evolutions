@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpeciesInfo } from "../engine/protocol";
-import { pickSpecies } from "./RunUntil";
+import { pickSpecies, validThreshold } from "./RunUntil";
 
 const sp = (id: number, extinct_year: number | null = null): SpeciesInfo => ({
   id,
@@ -32,5 +32,18 @@ describe("pickSpecies", () => {
     const r = pickSpecies([sp(1, 10)], 1);
     expect(r).toMatchObject({ sp: "all", speciesId: null });
     expect(r.alive).toEqual([]);
+  });
+});
+
+describe("threshold validation", () => {
+  it("accepts finite thresholds including zero and negative values", () => {
+    expect(validThreshold(0)).toBe(true);
+    expect(validThreshold(-12.5)).toBe(true);
+    expect(validThreshold(1e20)).toBe(true);
+  });
+  it("rejects NaN and infinite values", () => {
+    expect(validThreshold(Number.NaN)).toBe(false);
+    expect(validThreshold(Infinity)).toBe(false);
+    expect(validThreshold(-Infinity)).toBe(false);
   });
 });

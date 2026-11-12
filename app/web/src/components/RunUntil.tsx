@@ -29,6 +29,9 @@ export function pickSpecies(species: SpeciesInfo[], choice: number | "all") {
   return { alive, sp, speciesId };
 }
 
+/** Reject invalid threshold values before sending them to the simulation. */
+export const validThreshold = (value: number): boolean => Number.isFinite(value);
+
 /** "Run until" fast-forward (PRD FR-T3): jump ahead until an event or threshold. */
 export function RunUntil({ catalog, species, disabled, onRun }: Props) {
   const [open, setOpen] = useState(false);
@@ -40,8 +43,10 @@ export function RunUntil({ catalog, species, disabled, onRun }: Props) {
   const [years, setYears] = useState(10000);
   const { alive, sp, speciesId } = pickSpecies(species, spChoice);
   const needsSpecies = kind === "trait" && speciesId === null;
+  const invalidThreshold = (kind === "population" || kind === "trait") && !validThreshold(value);
 
   const run = () => {
+    if (needsSpecies || invalidThreshold) return;
     let until: StopCondition;
     if (kind === "population") until = { kind, species: sp === "all" ? null : sp, op, value };
     else if (kind === "trait") until = { kind, species: speciesId ?? 0, trait, op, value };
@@ -105,7 +110,7 @@ export function RunUntil({ catalog, species, disabled, onRun }: Props) {
                   <option value="below">falls below</option>
                   <option value="above">rises above</option>
                 </select>
-                <input type="number" value={value} step="any" onChange={(e) => setValue(Number(e.target.value))} aria-label="Threshold" style={{ width: 100 }} />
+                <input type="number" value={Number.isNaN(value) ? "" : value} step="any" onChange={(e) => setValue(e.target.value === "" ? Number.NaN : e.target.valueAsNumber)} aria-label="Threshold" aria-invalid={invalidThreshold} style={{ width: 100 }} />
                 {kind === "trait" && traitInfo?.unit && <span className="muted small">{traitInfo.unit}</span>}
               </div>
               {current !== undefined && <span className="muted small">Now {current.toPrecision(3)}</span>}
@@ -121,7 +126,7 @@ export function RunUntil({ catalog, species, disabled, onRun }: Props) {
               ))}
             </select>
           </label>
-          <button className="primary" disabled={needsSpecies} onClick={run}>
+          <button className="primary" disabled={needsSpecies || invalidThreshold} onClick={run}>
             Run
           </button>
         </div>
