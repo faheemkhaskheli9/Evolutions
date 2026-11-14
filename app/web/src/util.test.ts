@@ -61,6 +61,12 @@ describe("ramp", () => {
     expect(ramp(stops, -3)).toEqual([0, 0, 0]);
     expect(ramp(stops, 7)).toEqual([200, 0, 250]);
   });
+  it("handles missing data and degenerate palettes", () => {
+    expect(ramp(stops, NaN)).toEqual([0, 0, 0]);
+    expect(ramp(stops, Infinity)).toEqual([0, 0, 0]);
+    expect(ramp([[5, 6, 7]], 0.5)).toEqual([5, 6, 7]);
+    expect(() => ramp([], 0.5)).toThrow(RangeError);
+  });
 });
 
 describe("smoothSpeed", () => {

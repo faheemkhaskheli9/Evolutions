@@ -80,7 +80,10 @@ export const BIOME_COLORS: RGB[] = [
 ];
 
 export function ramp(stops: RGB[], t: number): RGB {
-  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  if (stops.length === 0) throw new RangeError("ramp requires at least one colour stop");
+  if (stops.length === 1) return [...stops[0]];
+  // Missing telemetry should not propagate NaN into canvas colour channels.
+  const x = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0)) * (stops.length - 1);
   const i = Math.min(stops.length - 2, Math.floor(x));
   const f = x - i;
   const a = stops[i];
