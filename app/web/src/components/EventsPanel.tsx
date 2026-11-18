@@ -9,6 +9,7 @@ const FILTERS: { key: string; label: string; kinds: SimEvent["kind"][] }[] = [
   { key: "extinction", label: "Extinctions", kinds: ["Extinction", "Crash"] },
   { key: "adaptation", label: "Adaptations", kinds: ["Adaptation"] },
   { key: "nature", label: "Climate & nature", kinds: ["Nature"] },
+  { key: "disease", label: "Disease", kinds: ["Disease"] },
   { key: "world", label: "World", kinds: ["Intervention", "Founders", "Mode", "Info"] },
 ];
 

@@ -79,6 +79,87 @@ export interface NaturalEvent {
   radius: number;
 }
 
+/** A pathogen to release with the Epidemic intervention (PRD FR-L12); mirrors the engine's `PathogenSpec`. */
+export interface PathogenSpec {
+  /** 0.01–1: the death rate while infected is 0.15 × virulence per day. */
+  virulence: number;
+  /** 0.01–1: transmission per contact. */
+  transmissibility: number;
+  /** Transmission rises with virulence, so intermediate virulence evolves. */
+  trade_off: boolean;
+  /** Share of the species infected at the start, in its most crowded places. */
+  share: number;
+}
+
+export const DEFAULT_PATHOGEN: PathogenSpec = { virulence: 0.3, transmissibility: 0.6, trade_off: true, share: 0.001 };
+
+/** A pathogen strain with infections, from the engine's `disease_json`. */
+export interface Strain {
+  id: number;
+  /** "P1" for an introduced strain, "P1.17" for strain 17 descended from it. */
+  name: string;
+  lineage: number;
+  parent: number | null;
+  /** The species it infects most. */
+  host: number;
+  virulence: number;
+  transmissibility: number;
+  /** Resistance loci (1–4) it escapes. */
+  escape: number[];
+  trade_off: boolean;
+  origin_year: number;
+  infected: number;
+  cases: number;
+  deaths: number;
+  /** Share of infections that end in death. */
+  fatality: number;
+  /** Basic reproduction number in its host now. */
+  r0: number;
+}
+
+/** An introduced pathogen and whether any of its strains still circulates. */
+export interface Lineage {
+  id: number;
+  name: string;
+  host: number;
+  origin_year: number;
+  virulence: number;
+  transmissibility: number;
+  trade_off: boolean;
+  circulating: boolean;
+}
+
+/** A species' hosts now. */
+export interface HostHealth {
+  id: number;
+  name: string;
+  n: number;
+  infected: number;
+  recovered: number;
+  /** Resistant allele frequency at loci R1–R4. */
+  resistance: number[];
+  /** Mean virulence and transmissibility of its infections (−1 when none). */
+  virulence: number;
+  transmissibility: number;
+  deaths: number;
+}
+
+/** Pathogens and host resistance (PRD FR-L12, FR-G14), from the engine's `disease_json`. */
+export interface Disease {
+  active: boolean;
+  cases: number;
+  deaths: number;
+  /** Strains with infections, most infections first (at most 40). */
+  strains: Strain[];
+  lineages: Lineage[];
+  species: HostHealth[];
+  /**
+   * Per species id: [year, hosts, infected, peak infected since the previous point, recovered,
+   * R1, R2, R3, R4, mean virulence, mean transmissibility, deaths so far].
+   */
+  series: Record<string, number[][]>;
+}
+
 /** The world's climate (PRD FR-W7, FR-E3), from the engine's `climate_json`. */
 export interface Climate {
   settings: NatureSettings | null;
@@ -272,6 +353,12 @@ export interface Status {
   /** Changes whenever biomes are recomputed. */
   climate_rev: number;
   individual_cap: number;
+  /** Whether a pathogen has been introduced (PRD FR-L12). */
+  disease?: boolean;
+  /** Hosts infected now. */
+  infected?: number;
+  /** Deaths from infection so far. */
+  disease_deaths?: number;
 }
 
 export interface SpeciesInfo {
@@ -291,7 +378,7 @@ export interface SpeciesInfo {
 
 export interface SimEvent {
   year: number;
-  kind: "Info" | "Founders" | "Speciation" | "Extinction" | "Mode" | "Intervention" | "Crash" | "Adaptation" | "Nature";
+  kind: "Info" | "Founders" | "Speciation" | "Extinction" | "Mode" | "Intervention" | "Crash" | "Adaptation" | "Nature" | "Disease";
   species: number | null;
   text: string;
   /** Position in the world's chronicle (added by the worker). */
@@ -313,7 +400,7 @@ export interface Why {
   numbers: [string, string][];
   /** Trait changes: drift or selection. */
   verdict: "selection" | "drift" | "mixed" | null;
-  /** Main cause: a hazard ("cold stress", …), "food", "predator", "climate", "intervention", "reproduction", "allopatric", "parapatric", … */
+  /** Main cause: a hazard ("cold stress", …), "food", "predator", "climate", "nature", "disease", "intervention", "reproduction", "allopatric", "parapatric", … */
   cause: string | null;
   /** The chart that shows it: "trait:<key>", "population", "popgen" or "tree". */
   chart: string | null;
@@ -524,6 +611,8 @@ export interface FrameMsg {
   speciesList?: SpeciesInfo[];
   /** Climate cycles and natural events; sent about once a second for worlds that have them. */
   climate?: Climate;
+  /** Pathogens and host resistance; sent about once a second once a pathogen has been introduced. */
+  disease?: Disease;
 }
 
 export type FromWorker =

@@ -1,15 +1,19 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import type { AlleleInfo, Brush, Catalog, Climate, ExportKind, ModeChoice, SimEvent, SpeciesDesign, SpeciesInfo, Status } from "../engine/protocol";
+import { DEFAULT_PATHOGEN, type AlleleInfo, type Brush, type Catalog, type Climate, type Disease, type ExportKind, type ModeChoice, type PathogenSpec, type SimEvent, type SpeciesDesign, type SpeciesInfo, type Status } from "../engine/protocol";
 import { ClimatePanel } from "./ClimatePanel";
+import { DiseasePanel } from "./DiseasePanel";
 import { BRUSHES } from "./brush";
-import { ALLELE_RAMP } from "../util";
+import { ALLELE_RAMP, DISEASE_RAMP } from "../util";
+import { DISEASE_FULL } from "./mapLayers";
 import { TemplateForm } from "./TemplateForm";
 import type { Layer, Tool } from "./MapView";
 
 interface Props {
   /** Climate cycles and natural events, when the world has them (PRD FR-W7, FR-E3). */
   climate: Climate | null;
+  /** Pathogens and host resistance, once one has been introduced (PRD FR-L12, FR-G14). */
+  disease: Disease | null;
   /** The Chronicle, for chart markers. */
   events: SimEvent[];
   catalog: Catalog;
@@ -69,6 +73,7 @@ const LAYERS: { key: Layer; label: string }[] = [
   { key: "vegetation", label: "Vegetation" },
   { key: "population", label: "Population density" },
   { key: "alleles", label: "Allele frequency" },
+  { key: "disease", label: "Disease" },
 ];
 
 /** "Body mass +0.12 · new (year 1,200) · 34%" */
@@ -87,6 +92,9 @@ export function describeAllele(a: AlleleInfo) {
 export function WorldPanel(p: Props) {
   const [plagueSpecies, setPlagueSpecies] = useState<number | "">("");
   const [plagueRate, setPlagueRate] = useState(50);
+  /** Epidemic kind: an infectious pathogen (PRD FR-L12) or an instant die-off. */
+  const [infectious, setInfectious] = useState(true);
+  const [pathogen, setPathogen] = useState<PathogenSpec>(DEFAULT_PATHOGEN);
   const [exportSpecies, setExportSpecies] = useState<number | "">("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const alive = p.species.filter((s) => s.extinct_year === null);
@@ -94,7 +102,7 @@ export function WorldPanel(p: Props) {
     <div className="panel-body">
       <h3>Map layer</h3>
       <div className="chips">
-        {LAYERS.map((l) => (
+        {LAYERS.filter((l) => l.key !== "disease" || p.status?.disease || p.layer === "disease").map((l) => (
           <button key={l.key} className={`chip ${p.layer === l.key ? "active" : ""}`} onClick={() => p.setLayer(l.key)}>
             {l.label}
           </button>
@@ -162,6 +170,17 @@ export function WorldPanel(p: Props) {
         </div>
       )}
 
+      {p.layer === "disease" && (
+        <div className="allele-layer">
+          <div className="ramp-legend small" aria-hidden>
+            <span>0%</span>
+            <i style={{ background: `linear-gradient(to right, ${DISEASE_RAMP.map((c) => `rgb(${c.join(",")})`).join(", ")})` }} />
+            <span>{Math.round(DISEASE_FULL * 100)}%+</span>
+          </div>
+          <p className="muted small">Share of each patch's animals (all species) infected now.</p>
+        </div>
+      )}
+
       <h3>Simulation detail</h3>
       <div className="segmented" role="radiogroup" aria-label="Fidelity mode">
         {(["Auto", "Individual", "Population", "Macro"] as ModeChoice[]).map((m) => (
@@ -225,6 +244,7 @@ export function WorldPanel(p: Props) {
       )}
 
       {p.climate && <ClimatePanel climate={p.climate} events={p.events} />}
+      {p.disease?.active && <DiseasePanel disease={p.disease} events={p.events} />}
 
       <h3>Change the world</h3>
       <p className="muted small">Interventions change conditions, never genes. Evolution does the rest.</p>
@@ -289,12 +309,74 @@ export function WorldPanel(p: Props) {
               </option>
             ))}
           </select>
-          <NumberInput min={1} max={100} value={plagueRate} onChange={setPlagueRate} aria-label="Mortality percent" />
-          <span className="muted">%</span>
-          <button disabled={plagueSpecies === ""} onClick={() => plagueSpecies !== "" && p.apply({ kind: "Plague", species: plagueSpecies, mortality: plagueRate / 100 })}>
-            Strike
+          <select value={infectious ? "pathogen" : "dieoff"} onChange={(e) => setInfectious(e.target.value === "pathogen")} aria-label="Epidemic kind">
+            <option value="pathogen">Infectious disease</option>
+            <option value="dieoff">Instant die-off</option>
+          </select>
+          {!infectious && (
+            <>
+              <NumberInput min={1} max={100} value={plagueRate} onChange={setPlagueRate} aria-label="Mortality percent" />
+              <span className="muted">%</span>
+            </>
+          )}
+          <button
+            disabled={plagueSpecies === ""}
+            onClick={() =>
+              plagueSpecies !== "" &&
+              p.apply(infectious ? { kind: "Outbreak", species: plagueSpecies, pathogen } : { kind: "Plague", species: plagueSpecies, mortality: plagueRate / 100 })
+            }
+          >
+            {infectious ? "Release" : "Strike"}
           </button>
         </div>
+        {infectious && (
+          <div className="pathogen">
+            <label>
+              <span>Virulence</span>
+              <input
+                type="range"
+                min={0.01}
+                max={1}
+                step={0.01}
+                value={pathogen.virulence}
+                onChange={(e) => setPathogen({ ...pathogen, virulence: Number(e.target.value) })}
+                aria-label="Virulence"
+              />
+              <span className="muted small">{pathogen.virulence.toFixed(2)}</span>
+            </label>
+            <label>
+              <span>Transmissibility</span>
+              <input
+                type="range"
+                min={0.01}
+                max={1}
+                step={0.01}
+                value={pathogen.transmissibility}
+                onChange={(e) => setPathogen({ ...pathogen, transmissibility: Number(e.target.value) })}
+                aria-label="Transmissibility"
+              />
+              <span className="muted small">{pathogen.transmissibility.toFixed(2)}</span>
+            </label>
+            <label>
+              <span>Infected at first</span>
+              <select value={pathogen.share} onChange={(e) => setPathogen({ ...pathogen, share: Number(e.target.value) })} aria-label="Share infected at first">
+                {[0.0001, 0.001, 0.01, 0.1, 1].map((v) => (
+                  <option key={v} value={v}>
+                    {v * 100}%
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="row gap">
+              <input type="checkbox" checked={pathogen.trade_off} onChange={(e) => setPathogen({ ...pathogen, trade_off: e.target.checked })} />
+              <span>Virulence–transmission trade-off</span>
+            </label>
+            <p className="muted small">
+              The pathogen starts where the species is most crowded, spreads by contact, kills, mutates and meets the hosts&apos; resistance genes. With the trade-off,
+              strains transmit only as well as they harm, so intermediate virulence evolves.
+            </p>
+          </div>
+        )}
       </div>
       <h3>Replay</h3>
       <p className="muted small">

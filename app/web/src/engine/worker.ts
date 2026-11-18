@@ -25,6 +25,7 @@ let lastSpeciesPost = 0;
 let lastDensityPost = 0;
 let lastForagePost = 0;
 let lastClimatePost = 0;
+let lastDiseasePost = 0;
 /** Whether the world has climate cycles or natural events. */
 let natureOn = false;
 /** Terrain last sent: coastline and biome revisions, and when (climate cycles redraw it). */
@@ -330,6 +331,7 @@ function sendCreated(fresh = true, save = true) {
   snowDay = NaN;
   lastForagePost = 0;
   lastClimatePost = 0;
+  lastDiseasePost = 0;
   eventsSent = 0;
   lastSpeciesPost = 0;
   achieved = 0;
@@ -368,6 +370,10 @@ function sendFrame(full = false) {
   if (natureOn && (full || now - lastClimatePost > 1000 || events.length > 0)) {
     lastClimatePost = now;
     msg.climate = JSON.parse(engine.climate());
+  }
+  if (status.disease && (full || now - lastDiseasePost > 1000 || events.length > 0)) {
+    lastDiseasePost = now;
+    msg.disease = JSON.parse(engine.disease());
   }
   if (status.mode === "Individual") {
     msg.positions = engine.positions();

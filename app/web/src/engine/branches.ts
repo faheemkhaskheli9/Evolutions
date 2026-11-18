@@ -107,7 +107,7 @@ export function sharedSpecies(a: BranchHistory, b: BranchHistory): SpeciesInfo[]
 }
 
 /** The kinds of event the comparison lists. */
-export const COMPARED_KINDS = new Set(["Speciation", "Extinction", "Intervention", "Founders", "Crash", "Nature"]);
+export const COMPARED_KINDS = new Set(["Speciation", "Extinction", "Intervention", "Founders", "Crash", "Nature", "Disease"]);
 
 const sameEvent = (x: SimEvent, y: SimEvent) => x.year === y.year && x.kind === y.kind && x.text === y.text && x.species === y.species;
 

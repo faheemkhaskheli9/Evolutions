@@ -21,6 +21,7 @@ All screenshots come from a single run of the Earth-like Continent template, see
 10. [Run until something happens](#10-run-until-something-happens)
 11. [Watch a region in a crowded world](#11-watch-a-region-in-a-crowded-world)
 12. [Change the world (interventions)](#12-change-the-world-interventions)
+    - [Disease](#disease)
     - [Edit the world](#edit-the-world)
 13. [Save, open, resume and replay](#13-save-open-resume-and-replay)
 14. [Keyboard and mouse reference](#14-keyboard-and-mouse-reference)
@@ -363,8 +364,9 @@ It records:
 - **New species**, **extinctions** and **population crashes**.
 - **World events:** founders released, mode switches, interventions, and climate recovering after an impact winter.
 - **Climate and natural events** (if the world has them): droughts, wildfires, harsh winters and eruptions with where they struck, land bridges opening and flooding as the sea falls and rises, and each glacial maximum and interglacial.
+- **Disease** (once you release a pathogen): the outbreak and its R₀, each epidemic (when more than 10% of a species is infected at once), a pathogen dying out, and a resistance allele becoming common.
 
-Use the filter chips (**All**, **New species**, **Extinctions**, **Adaptations**, **Climate & nature**, **World**) to focus on one kind of event.
+Use the filter chips (**All**, **New species**, **Extinctions**, **Adaptations**, **Climate & nature**, **Disease**, **World**) to focus on one kind of event.
 
 The **⟲** button at the end of an entry goes back to just before that event (see [Rewind](#rewind)).
 
@@ -376,7 +378,7 @@ Adaptations, population crashes, extinctions and new species have a **Why?** lin
 
 - **Trait changes** get a verdict: **Selection**, **Consistent with drift**, or **Selection and drift**. Random genetic drift moves a trait's average by about √(V_A·t/Nₑ) over t generations (V_A is the trait's additive genetic variance, Nₑ the effective population size). The panel compares the actual change with that: more than 3 times as large is selection, less than 2 times is consistent with drift, and in between is mixed. Large populations drift very little, so a steady change in a big population is almost always selection; in a small one, even a large change can be chance.
 - It then names the **hazard the trait affects most** and which way it pushes: for example *"The main pressure is cold stress: animals with higher insulation suffer less cold stress"*, and what holds the change back (*"animals with higher insulation need more food"*). These come from splitting the trait's selection gradient (β) into starvation, dehydration, predation, heat stress, cold stress, ageing and reproduction. Cold and heat include the stress newborns face in their birth month.
-- **Crashes and extinctions** name the hazard that grew most between the population's peak and the crash (or, if none rose, the one that stayed high), and the matching cause: a food shortage (often a population that outgrew its food), a new predator or more predators, a climate shift (from you or from the glacial cycle), a drought, wildfire, harsh winter or eruption that reached the species' range, or one of your interventions (a plague or a meteor).
+- **Crashes and extinctions** name the hazard that grew most between the population's peak and the crash (or, if none rose, the one that stayed high), and the matching cause: a food shortage (often a population that outgrew its food), a new predator or more predators, a climate shift (from you or from the glacial cycle), a drought, wildfire, harsh winter or eruption that reached the species' range, an epidemic (when deaths from infection per animal rose more than any other hazard), or one of your interventions (an instant die-off or a meteor).
 - **New species** say whether the split was allopatric (and what separated the ranges: open water, mountains or a gap in the range) or parapatric, and which of the three isolation factors contributed most: hybrid incompatibilities, mate choice, or breeding at different times of year.
 
 **The numbers** opens the values behind the answer, and the link at the bottom opens the chart that shows it (the trait's chart, the population chart, or the tree).
@@ -396,6 +398,7 @@ In the **World** tab, **Map layer** switches what the map shows:
 | **Rainfall** | Annual precipitation from brown (dry) to teal (wet). Look for rain shadows behind mountain ranges. |
 | **Vegetation** | How much forage is left compared with what the land can grow. Grazing pressure shows up as browner areas. |
 | **Population density** | Organisms per tile on a heat scale, for **all species** or one species picked in **Density of**. In the 3D world each occupied tile becomes a column: the taller and brighter, the denser. |
+| **Disease** | Once a pathogen has been released: the share of each patch's animals infected now, from cream (none) to dark red (30% or more). Watch an epidemic travel as a wave and leave immune animals behind. |
 | **Allele frequency** | How common one allele (gene variant) of a species is in each patch, from dark purple (absent) to yellow (every gene copy). Pick the **Species** and then the **Allele**: the list shows the species' variable alleles (between 1% and 99% of gene copies), trait genes first, each with its effect on the trait (on the genetic scale), whether the founders carried it or it arose as a mutation (and in which year), and its share in the whole species. Watch a new mutation spread out from where it arose, or a cline form along a climate gradient. |
 
 In the 3D world the chosen layer is draped over the relief, so you can see, for example, the cold along a mountain spine or the dry side of a range.
@@ -454,7 +457,7 @@ Interventions change **conditions only, never genes**. Evolution does the rest. 
 | **Climate** | Click **−5 °C**, **−2 °C**, **+2 °C** or **+5 °C**. | Shifts global temperature. Biomes, plant growth and heat or cold stress change; watch insulation, body size and ranges respond. The current offset is shown below the buttons. |
 | **Meteor impact** | Click **Arm meteor**, then click the map. | Kills nearly everything within the blast radius, strips vegetation, and causes an impact winter (−4 °C for about 8 years). |
 | **Introduce species** | Pick a species and a count, then **Place** (and click the map) or **Best habitat**. **Design…** makes a new species, checked against this world (see [Design a species](#design-a-species)). | Releases new founders. Good for invasive-species or predator-reintroduction experiments. If there is no suitable habitat where you click (open ocean, for example), the app says so and nothing is added. |
-| **Epidemic** | Pick a species and a mortality %, then **Strike**. | Kills that share of the species, creating a bottleneck. Watch genetic diversity drop. |
+| **Epidemic** | Pick a species. **Infectious disease** (the default): set the pathogen's virulence and transmissibility, the share infected at first and the trade-off, then **Release**. **Instant die-off**: pick a mortality %, then **Strike**. | A pathogen spreads, kills and evolves, and the species evolves resistance (see [Disease](#disease)). A die-off kills that share of the species at once, creating a bottleneck: watch genetic diversity drop. |
 
 Interventions and natural events are also marked on the charts: a dashed line at the year (yellow for your interventions, orange for natural events) on the species population and trait charts and the climate charts. Point at one to read what happened.
 
@@ -469,6 +472,35 @@ In a world with climate cycles or natural events, the **World** tab has a **Clim
 ![The Climate section: temperature offset, sea level, large landmasses and events under way, with temperature and sea-level charts marked by events](guide/33-climate.png)
 
 The map and the 3D world follow the climate: coastlines move as the sea falls and rises, and biomes shift as the world cools and warms.
+
+### Disease
+
+The **Epidemic** intervention releases an infectious pathogen into one species. It starts where the species is most crowded and spreads by contact: each day an infected animal meets the animals of its species around it, more often if the species is social, and less each when many are crowded together. An infected animal recovers after about 10 days, immune for about a year, or dies of the infection.
+
+![Epidemic: species, Infectious disease, virulence and transmissibility sliders, the share infected at first and the trade-off](guide/34-epidemic.png)
+
+| Setting | Meaning |
+|---|---|
+| **Virulence** | How fast an infection kills (0–1). At 1, about 60% of infections end in death. |
+| **Transmissibility** | How easily it passes on at each contact (0–1). |
+| **Infected at first** | The share of the species infected when it is released, in its most crowded places. |
+| **Virulence–transmission trade-off** | On: a strain passes on well only if it multiplies, and so harms, a lot. A mild strain spreads poorly and a deadly one kills its host before passing on, so strains of intermediate virulence win. Off: the mildest strains win. |
+
+**R₀**, the number of animals one infected animal infects in a healthy population, is in the Chronicle entry for the outbreak. Above 1 the pathogen spreads; below 1 it dies out. It is higher in dense, social species.
+
+Both sides evolve:
+- **The pathogen** mutates: about one infection in 500 starts a new strain with a slightly different virulence and transmissibility, which may also escape one of the hosts' resistance genes (at some cost to its spread). Strains are named after the pathogen you released: **P1**, then **P1.17**, **P1.230** …
+- **The hosts** carry four resistance genes, **R1** to **R4**. Each resistant copy makes infection less likely by strains that do not escape that gene, but costs a little survival. Every species starts with a few resistant copies. An epidemic kills the animals without them, so resistance rises. When strains escape it, or the pathogen is gone, its cost lowers it again: a host–parasite arms race.
+
+In the **World** tab, the **Disease** section shows the species most infected (or pick one): the animals infected now and immune, deaths from the disease, and charts of the share infected, the resistant gene frequencies and the strains' mean virulence and transmissibility, marked with your interventions. **Strains** lists those with most infections: virulence, transmissibility, the share of infections that kill (**Fatal**), R₀ and animals infected. Point at a strain for the resistance genes it escapes.
+
+![The Disease section: infected and immune hares, deaths, the share infected, resistance gene frequencies rising after the outbreak, virulence evolving from 0.3 to about 0.4 while transmissibility climbs, and the strains](guide/35-disease.png)
+
+The **Disease** map layer shows where it is:
+
+![Disease map layer: infected share of each patch, from cream to red](guide/36-layer-disease.png)
+
+Disease runs in Individual and Population mode, and switching between them keeps who is infected. Macro mode's 1,000-year steps hold it as it is.
 
 ### Edit the world
 
@@ -561,7 +593,8 @@ When the replay ends, a message says whether the world is identical to the origi
 - **Try again from the same moment:** rewind to just before an event (the **⟲** in the Chronicle) and do something different, such as a smaller meteor or no epidemic. Or branch instead, to keep both versions and compare them (see [Branches](#branches-what-if)).
 - **Compare like with like:** use the same seed and change one thing, such as the climate, a founder count or mutation rates. Then compare the Species charts. For a change during a run, branch first and use **Compare…**.
 - **See natural selection:** the **Ice Age Eurasia** template with 1,000–5,000 years of jumps shows insulation rising. The **Desert & Oasis** template shows kidneys and heat tolerance improving.
-- **See a bottleneck:** strike a species with a 90% epidemic, then watch its neutral genetic diversity in the Species tab.
+- **See a bottleneck:** strike a species with a 90% instant die-off, then watch its neutral genetic diversity in the Species tab.
+- **See an arms race:** release a deadly pathogen (virulence 0.9) with the trade-off into the commonest species of the Earth-like template and jump a few hundred years. Resistance genes rise after the first epidemics, virulence falls towards an intermediate value, and the pathogen settles in as an endemic disease. Try it without the trade-off, or release a mild one (virulence 0.05).
 - **See predator–prey dynamics:** in the Earth-like template, watch the wolf and hare population charts after the wolves arrive in year 40. Abundant hares can sustain enough wolves to wipe out the scarcer deer (apparent competition).
 - **See speciation:** use small isolated populations (**Archipelago**, **Island Dwarfism Lab**) and **Run until… a new species arises** with a 100,000-year cap.
 - **Deep time:** Population mode runs at roughly 40–90 simulated years per second, depending on world size, so use it for up to tens of thousands of years. For longer spans, jump 100,000 years or play at **10,000 years/s** or **1 My/s**: Macro mode covers a million years in a few minutes.

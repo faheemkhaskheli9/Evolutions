@@ -34,7 +34,9 @@ pub const SAVE_MAGIC: &[u8; 4] = b"EVO1";
 /// replay logs that use it cannot be opened by older engines.
 /// Version 7 (same outcomes for worlds without them) adds climate cycles and natural
 /// events (`nature`), saved after the "Why?" records; older saves load with them off.
-pub const MODEL_VERSION: u32 = 7;
+/// Version 8 (same outcomes for worlds without them) adds pathogens and host resistance
+/// (`disease`), saved after the climate section; older saves load with no pathogens.
+pub const MODEL_VERSION: u32 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -102,8 +104,14 @@ pub enum Intervention {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         design: Option<SpeciesDesign>,
     },
-    /// Epidemic killing a fraction of one species.
+    /// Epidemic killing a fraction of one species at once.
     Plague { species: u32, mortality: f32 },
+    /// An infectious pathogen released into one species (PRD FR-L12): it spreads, kills,
+    /// mutates and meets host resistance (see `crate::disease`).
+    Outbreak {
+        species: u32,
+        pathogen: crate::disease::PathogenSpec,
+    },
     /// A world-editor brush stroke (PRD FR-W3).
     EditWorld { stroke: Stroke },
 }
@@ -180,6 +188,10 @@ pub struct Simulation {
     /// records; part of `state_hash()` only when the world has any.
     #[serde(skip)]
     pub nature: crate::nature::Nature,
+    /// Pathogens and host resistance (PRD FR-L12, FR-G14). Saved after the climate
+    /// section; part of `state_hash()` once a pathogen has been introduced.
+    #[serde(skip)]
+    pub disease: crate::disease::Disease,
 }
 
 impl Simulation {
@@ -249,6 +261,7 @@ impl Simulation {
             edit_history: Default::default(),
             designs: cfg.designs.clone(),
             nature: Default::default(),
+            disease: Default::default(),
         };
         sim.nature = crate::nature::Nature::new(cfg.nature.clone(), &sim.world);
         sim.event(
@@ -406,6 +419,7 @@ impl Simulation {
             mutations,
             alive: true,
             cause: None,
+            health: Default::default(),
         }
     }
 
@@ -608,7 +622,7 @@ impl Simulation {
             tmpl.color,
             self.seed,
         );
-        let mut new = Vec::with_capacity(g.count as usize);
+        let mut new: Vec<Animal> = Vec::with_capacity(g.count as usize);
         for k in 0..g.count {
             let genome = self.archs[arch_id as usize].founder_genome(&mut rng);
             let t = tiles[rng.weighted(&weights)].0;
@@ -637,6 +651,7 @@ impl Simulation {
             );
             new.push(a);
         }
+        self.founder_health(&mut new);
         match self.mode {
             Mode::Individual => self.animals.extend(new),
             Mode::Population | Mode::Macro => self.absorb_into_demes(new),
@@ -659,7 +674,9 @@ impl Simulation {
         if a.alive {
             a.alive = false;
             a.cause = Some(cause);
-            self.deaths[cause as usize] += 1;
+            if let Some(d) = self.deaths.get_mut(cause as usize) {
+                *d += 1;
+            }
             self.note_death(i, cause);
         }
     }
@@ -671,8 +688,14 @@ impl Simulation {
     pub fn step(&mut self) {
         match self.mode {
             Mode::Individual => self.tick_individual(),
-            Mode::Population => self.step_population(),
-            Mode::Macro => self.step_macro(),
+            Mode::Population => {
+                self.step_population();
+                self.disease_year();
+            }
+            Mode::Macro => {
+                self.step_macro();
+                self.disease_after_macro();
+            }
         }
         self.after_step();
     }
@@ -1190,6 +1213,7 @@ impl Simulation {
             self.metrics.push(id, sample);
         }
         self.record_popgen(year);
+        self.record_disease(year);
         self.record_insight(year, &pending);
     }
 
@@ -1399,6 +1423,12 @@ impl Simulation {
                     format!("Plague struck {name}: {killed} died."),
                 );
             }
+            Intervention::Outbreak { species, pathogen } => {
+                if species as usize >= self.species.list.len() {
+                    return Err(format!("unknown species {species}"));
+                }
+                self.outbreak(species, &pathogen)?;
+            }
         }
         Ok(())
     }
@@ -1519,8 +1549,8 @@ impl Simulation {
     // ---- Persistence ----------------------------------------------------------------------
 
     /// Save file: magic, the state (bincode), the replay log (JSON in a bincode string),
-    /// then the population-genetics series, the "Why?" records and the climate cycles and
-    /// natural events (bincode).
+    /// then the population-genetics series, the "Why?" records, the climate cycles and
+    /// natural events, and the pathogens with the hosts' resistance and infections (bincode).
     pub fn save_bytes(&self) -> Result<Vec<u8>, String> {
         let mut out = SAVE_MAGIC.to_vec();
         let mut sim = bincode::serialize(self).map_err(|e| e.to_string())?;
@@ -1532,6 +1562,7 @@ impl Simulation {
         out.extend(bincode::serialize(&self.popgen).map_err(|e| e.to_string())?);
         out.extend(bincode::serialize(&self.insight).map_err(|e| e.to_string())?);
         out.extend(bincode::serialize(&self.nature).map_err(|e| e.to_string())?);
+        out.extend(bincode::serialize(&self.disease_saved()).map_err(|e| e.to_string())?);
         Ok(out)
     }
 
@@ -1562,6 +1593,11 @@ impl Simulation {
             if version >= 7 {
                 sim.nature = crate::nature::Nature::deserialize(&mut de)
                     .map_err(|e| corrupt(e.to_string()))?;
+            }
+            if version >= 8 {
+                let saved = crate::disease::Saved::deserialize(&mut de)
+                    .map_err(|e| corrupt(e.to_string()))?;
+                sim.restore_disease(saved).map_err(corrupt)?;
             }
             sim.rebuild_designs().map_err(corrupt)?;
             sim.validate().map_err(corrupt)?;
@@ -1668,6 +1704,8 @@ impl Simulation {
             };
             bytes.extend(bincode::serialize(&n).unwrap_or_default());
         }
+        // And pathogens with the hosts' resistance and infections (the chart series aside).
+        bytes.extend(self.disease_hash_bytes());
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         for b in bytes {
             h ^= b as u64;

@@ -222,6 +222,11 @@ impl Engine {
         self.sim.climate_json().to_string()
     }
 
+    /// Pathogens and host resistance as JSON (see `Simulation::disease_json`).
+    pub fn disease(&self) -> String {
+        self.sim.disease_json().to_string()
+    }
+
     pub fn species(&self) -> String {
         self.sim.species_json().to_string()
     }

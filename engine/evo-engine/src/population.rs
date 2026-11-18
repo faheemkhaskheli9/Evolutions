@@ -40,6 +40,10 @@ pub struct Deme {
     /// Per locus: (allele id, frequency), sorted by id.
     pub freqs: Vec<Vec<(u32, f32)>>,
     pub condition: f32,
+    /// Resistance allele frequencies and infections, once a pathogen has been introduced.
+    /// Not in the bincode state: saved in the disease section.
+    #[serde(skip)]
+    pub health: Option<crate::disease::DemeHealth>,
 }
 
 impl Deme {
@@ -105,6 +109,10 @@ impl Deme {
             *c -= d as u32;
             k += d;
         }
+        if let Some(h) = self.health.as_mut() {
+            h.thin(1.0 - frac, rng);
+            h.fit(self.females.iter().sum::<u32>() + self.males.iter().sum::<u32>());
+        }
         k
     }
 
@@ -140,6 +148,11 @@ impl Deme {
             self.males[k] += other.males[k];
         }
         self.condition = self.condition * w1 + other.condition * (1.0 - w1);
+        match (self.health.as_mut(), other.health.as_ref()) {
+            (Some(h), Some(o)) => h.merge(o, w1),
+            (None, Some(o)) => self.health = Some(o.clone()),
+            _ => {}
+        }
     }
 }
 
@@ -1104,6 +1117,7 @@ impl Simulation {
             // Selection against incompatible combinations within the deme.
             select_dmi(deme, arch, &self.alleles, seed, dmi_p, dmi_s, 1.0);
             // Demography.
+            let n_before = deme.total();
             let mat = base.maturity_years;
             let mut births = 0u64;
             let mut adults_f = 0u32;
@@ -1146,6 +1160,10 @@ impl Simulation {
             deme.females[0] = bf;
             deme.males[0] = births as u32 - bf;
             deme.condition = e.food_ratio.min(1.0);
+            if deme.health.is_some() {
+                let key = ((deme.species as u64) << 32) | deme.patch as u64;
+                Simulation::thin_after_demography(seed, tick, key, deme, n_before, births as u32);
+            }
 
             // Drift (Wright–Fisher with effective size) and mutation.
             let n = deme.total();
@@ -1294,6 +1312,13 @@ impl Simulation {
             if taken == 0 {
                 continue;
             }
+            // Infected and recovered hosts among the migrants.
+            let n_src = demes[k].total() + taken;
+            let moved = demes[k].health.as_mut().map(|h| {
+                let mut drng =
+                    Rng::keyed(seed, tick, (k as u64) << 20 | to as u64, stream::DISEASE);
+                h.split(n_src, taken, &mut drng)
+            });
             let species = demes[k].species;
             match where_is.get(&(species, to)).copied() {
                 Some(j) if j != k => {
@@ -1314,6 +1339,11 @@ impl Simulation {
                         dst.males[a] += males[a];
                     }
                     dst.condition = dst.condition * w1 + src.condition * (1.0 - w1);
+                    match (dst.health.as_mut(), moved) {
+                        (Some(h), Some(m)) => h.merge(&m, w1),
+                        (None, Some(m)) => dst.health = Some(m),
+                        _ => {}
+                    }
                 }
                 Some(_) => {}
                 None => {
@@ -1326,6 +1356,7 @@ impl Simulation {
                         males,
                         freqs: src.freqs.clone(),
                         condition: src.condition,
+                        health: moved,
                     };
                     where_is.insert((species, to), demes.len());
                     demes.push(colonists);
@@ -1362,6 +1393,7 @@ impl Simulation {
                 males: vec![0; AGE_CLASSES],
                 freqs: vec![],
                 condition: 0.0,
+                health: self.deme_health_from(&members),
             };
             for a in &members {
                 let age = ((a.age_days(now, dm) / 365.25) as usize).min(AGE_CLASSES - 1);
@@ -1417,6 +1449,7 @@ impl Simulation {
             if land.is_empty() {
                 continue;
             }
+            let first = self.animals.len();
             for age in 0..AGE_CLASSES {
                 for (sex, count) in [(Sex::Female, d.females[age]), (Sex::Male, d.males[age])] {
                     for _ in 0..count {
@@ -1444,6 +1477,7 @@ impl Simulation {
                     }
                 }
             }
+            self.materialize_health(d, first, k as u64);
         }
     }
 

@@ -482,6 +482,35 @@ try {
     const t = JSON.parse(readFileSync(file, "utf8"));
     if (t.version !== 4 || t.nature?.glacial?.period_years !== 2000 || !t.nature.droughts || t.nature.fires) throw new Error(`template lacks the climate settings: ${JSON.stringify(t.nature)}`);
   });
+  await step("disease: a released pathogen spreads, is charted, mapped and logged", async () => {
+    await page.getByRole("tab", { name: "World" }).click();
+    const pick = page.getByLabel("Species struck by epidemic");
+    const first = await pick.locator("option").nth(1).getAttribute("value");
+    await pick.selectOption(first);
+    await page.getByLabel("Epidemic kind").selectOption("pathogen");
+    await page.getByLabel("Share infected at first").selectOption({ label: "1%" });
+    await page.getByRole("button", { name: "Release" }).click();
+    const disease = page.getByRole("region", { name: "Disease" });
+    await disease.waitFor({ timeout: 10000 });
+    await disease.getByText(/^Circulating: P1\.|^No pathogen circulates/).waitFor({ timeout: 10000 });
+    const target = (await page.evaluate(() => window.__evoHash())).year + 100;
+    await page.getByRole("button", { name: "+100 yr" }).click();
+    for (let t = 0; (await page.evaluate(() => window.__evoHash())).year < target; t++) {
+      if (t > 900) throw new Error("jump did not finish");
+      await page.waitForTimeout(200);
+    }
+    await page.getByText("Fast-forwarding…").waitFor({ state: "detached", timeout: 30000 });
+    await disease.getByText("Resistant allele frequency").waitFor({ timeout: 10000 });
+    if ((await disease.locator(".marker").count()) === 0) throw new Error("no outbreak marker on the disease charts");
+    // The disease map layer.
+    await page.getByRole("button", { name: "Disease", exact: true }).click();
+    await page.getByText("Share of each patch's animals (all species) infected now.").waitFor();
+    await page.getByRole("button", { name: "Terrain & biomes" }).click();
+    await page.getByRole("tab", { name: /Chronicle/ }).click();
+    await page.getByRole("button", { name: "Disease", exact: true }).click();
+    await page.getByText(/^Outbreak of P1 in /).first().waitFor({ timeout: 10000 });
+    await page.getByRole("tab", { name: "World" }).click();
+  });
   const fatal = errors.filter((e) => !/favicon/.test(e));
   if (fatal.length) throw new Error(`page errors:\n${fatal.join("\n")}`);
   console.log("\nSmoke test passed.");

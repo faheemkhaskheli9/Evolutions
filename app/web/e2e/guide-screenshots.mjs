@@ -304,6 +304,29 @@ try {
   await climate.getByText("Sea level (m)").waitFor({ timeout: 10000 });
   await page.waitForTimeout(1200);
   await shot("33-climate", climate);
+  console.log("14. Disease");
+  await page.getByLabel("Species struck by epidemic").selectOption({ label: "Steppe hare" });
+  await page.getByLabel("Epidemic kind").selectOption("pathogen");
+  await page.getByLabel("Share infected at first").selectOption({ label: "1%" });
+  await page.locator(".pathogen").scrollIntoViewIfNeeded();
+  await shot("34-epidemic", page.locator(".iv").filter({ has: page.locator(".pathogen") }));
+  await page.getByRole("button", { name: "Release" }).click();
+  await noToasts();
+  await jump("+100 yr");
+  await jump("+100 yr");
+  await noToasts();
+  const disease = page.getByRole("region", { name: "Disease" });
+  await disease.getByText("Resistant allele frequency").waitFor({ timeout: 10000 });
+  // The section is taller than the window: show it whole.
+  await page.setViewportSize({ width: 1440, height: 2200 });
+  await page.waitForTimeout(1200);
+  await shot("35-disease", disease);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Disease", exact: true }).click();
+  await page.getByRole("radio", { name: "Flat map" }).click();
+  await page.waitForTimeout(2000);
+  await shot("36-layer-disease");
+  await page.getByRole("button", { name: "Terrain & biomes" }).click();
   console.log("Done.");
 } catch (e) {
   console.error("FAILED:", e.message);

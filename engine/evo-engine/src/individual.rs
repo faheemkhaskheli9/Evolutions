@@ -85,7 +85,7 @@ impl Grid {
     }
 
     #[inline]
-    fn cell(&self, t: usize) -> &[u32] {
+    pub(crate) fn cell(&self, t: usize) -> &[u32] {
         &self.items[self.start[t] as usize..self.start[t + 1] as usize]
     }
 }
@@ -125,7 +125,7 @@ const MAX_REACH: f32 = 2.0;
 const MAX_NEAR: usize = (2 * MAX_REACH as usize + 1) * (2 * MAX_REACH as usize + 1);
 
 /// Tile indices around a point, stored inline so hot loops do not allocate.
-struct Near {
+pub(crate) struct Near {
     tiles: [usize; MAX_NEAR],
     len: usize,
 }
@@ -138,7 +138,7 @@ impl std::ops::Deref for Near {
 }
 
 /// Tiles within `r` tiles of (x, y) (`r` is capped at `MAX_REACH`).
-fn tiles_around(world: &World, x: f32, y: f32, r: f32) -> Near {
+pub(crate) fn tiles_around(world: &World, x: f32, y: f32, r: f32) -> Near {
     let ri = r.min(MAX_REACH).ceil() as i64;
     let (tx, ty) = (x.floor() as i64, y.floor() as i64);
     let mut out = Near {
@@ -192,7 +192,8 @@ impl Simulation {
             day_minutes: dm,
             year_frac: (doy / self.params.year_days) as f32,
         };
-        if day != self.last_day {
+        let new_day = day != self.last_day;
+        if new_day {
             self.last_day = day;
             let decay = self.params.carcass_decay_per_day as f32;
             self.world.grow_vegetation_day(doy, decay);
@@ -202,6 +203,9 @@ impl Simulation {
         self.index.clear();
         for (i, a) in self.animals.iter().enumerate() {
             self.index.insert(a.id, i);
+        }
+        if new_day && self.disease.active {
+            self.disease_day(day);
         }
         for i in 0..self.animals.len() {
             if self.animals[i].alive {
@@ -275,6 +279,7 @@ impl Simulation {
             if due {
                 let preg = a.pregnancy.take().unwrap();
                 let (mid, gen, sp, arch, x, y) = (a.id, a.generation, a.species, a.arch, a.x, a.y);
+                let mother_health = a.health;
                 a.offspring += preg.embryos.len() as u32;
                 a.last_birth_minute = ctx.now;
                 let mut brng = Rng::keyed(self.seed, ctx.tick, mid, stream::BIRTH);
@@ -305,8 +310,11 @@ impl Simulation {
                         muts,
                         &mut brng,
                     );
+                    let mut child = child;
+                    child.health = self.newborn_health(mother_health, mid, child.id);
                     self.pending.push(child);
                 }
+                self.litter_born(mid);
             }
         }
     }
@@ -892,12 +900,16 @@ impl Simulation {
             return;
         }
         let neonate = fa.d.neonate_kg;
+        let pregnant = embryos.len();
         fa.pregnancy = Some(Pregnancy {
             father: father_id,
             due_minute: ctx.now + (fa.d.gestation_days * ctx.day_minutes as f32) as u64,
             litter_kg: neonate * embryos.len() as f32,
             embryos,
         });
+        if pregnant > 0 {
+            self.note_conception(f, m, ctx.tick);
+        }
     }
 
     /// Mother feeds a dependent young (lactation, TRD TR-R6/R7).

@@ -26,6 +26,7 @@
 pub mod animal;
 pub mod api;
 pub mod designer;
+pub mod disease;
 pub mod editor;
 pub mod explain;
 pub mod export;
@@ -50,6 +51,7 @@ pub mod user_template;
 pub mod world;
 
 pub use designer::SpeciesDesign;
+pub use disease::PathogenSpec;
 pub use nature::{GlacialCycle, NatureSettings};
 pub use params::{Realism, SimParams};
 pub use replay::{Replay, ReplayScript};

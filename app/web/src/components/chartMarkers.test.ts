@@ -32,6 +32,14 @@ describe("chart markers", () => {
     expect(chartMarkers(events, { all: true, max: 2 }).map((x) => x.x)).toEqual([12, 12.5]);
   });
 
+  it("marks the pathogens you release, but not epidemics as they happen", () => {
+    const m = chartMarkers([
+      ev(2, "Disease", "Outbreak of P1 in Steppe hare around 3°N 148°E: 25 infected (virulence 0.30, transmissibility 0.60, R₀ ≈ 1.9)."),
+      ev(3, "Disease", "Epidemic: P1 infects 23% of Steppe hare."),
+    ]);
+    expect(m.map((x) => [x.x, x.kind])).toEqual([[2, "intervention"]]);
+  });
+
   it("finds the marker nearest the pointer", () => {
     const m = chartMarkers(events);
     expect(nearestMarker(m, 8.6, 1)?.x).toBe(9);

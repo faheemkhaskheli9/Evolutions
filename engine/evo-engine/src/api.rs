@@ -122,6 +122,75 @@ impl Simulation {
             "climate_rev": self.world.revision,
             "individual_cap": self.params.individual_cap,
             "events": self.events.len(),
+            // Pathogens (PRD FR-L12): whether any was introduced, hosts infected now and
+            // deaths from infection so far.
+            "disease": self.disease.active,
+            "infected": self.disease.strains.iter().map(|s| s.infected as u64).sum::<u64>(),
+            "disease_deaths": self.disease.deaths,
+        })
+    }
+
+    /// Pathogens and host resistance (PRD FR-L12, FR-G14): strains with infections (most
+    /// infections first), each living species' hosts now, and the chart series, as JSON.
+    pub fn disease_json(&self) -> Value {
+        let d = &self.disease;
+        let stats = self.host_stats();
+        let alive: Vec<u32> = self.species.alive().map(|s| s.id).collect();
+        let mut strains: Vec<&crate::disease::Strain> = d.strains.iter().collect();
+        strains.sort_by(|a, b| b.infected.cmp(&a.infected).then(a.id.cmp(&b.id)));
+        // R₀'s host side, by (species, loci escaped): it is the same for many strains.
+        let contacts = std::cell::RefCell::new(std::collections::BTreeMap::<(u32, u8), f32>::new());
+        let strain = |s: &crate::disease::Strain| {
+            // R₀ in the species most infected by it.
+            let host = stats
+                .iter()
+                .filter(|(_, st)| st.by_strain.contains_key(&s.id))
+                .max_by_key(|(_, st)| st.by_strain[&s.id])
+                .map_or(s.host, |(sp, _)| *sp);
+            json!({
+                "id": s.id, "name": s.name(), "lineage": s.lineage,
+                "parent": (s.parent != u32::MAX).then_some(s.parent),
+                "host": host,
+                "virulence": s.virulence, "transmissibility": s.transmissibility,
+                "escape": (0..crate::disease::RES_LOCI).filter(|i| s.escape >> i & 1 == 1).map(|i| i + 1).collect::<Vec<_>>(),
+                "trade_off": s.trade_off, "origin_year": s.origin_year,
+                "infected": s.infected, "cases": s.cases, "deaths": s.deaths,
+                "fatality": s.fatality(),
+                "r0": if s.infected > 0 {
+                    let c = *contacts
+                        .borrow_mut()
+                        .entry((host, s.escape))
+                        .or_insert_with(|| self.r0_contacts(host, s.escape));
+                    s.beta() / (s.death_rate() + crate::disease::RECOVERY) * c
+                } else {
+                    0.0
+                },
+            })
+        };
+        json!({
+            "active": d.active,
+            "cases": d.cases,
+            "deaths": d.deaths,
+            "strains": strains.iter().filter(|s| s.infected > 0).take(40).map(|s| strain(s)).collect::<Vec<_>>(),
+            "lineages": strains.iter().filter(|s| s.id == s.lineage).map(|s| json!({
+                "id": s.id, "name": s.name(), "host": s.host, "origin_year": s.origin_year,
+                "virulence": s.virulence, "transmissibility": s.transmissibility, "trade_off": s.trade_off,
+                "circulating": d.circulating.contains(&s.lineage),
+            })).collect::<Vec<_>>(),
+            "species": alive.iter().filter_map(|sp| stats.get(sp).map(|st| (sp, st))).filter(|(_, st)| st.n > 0).map(|(sp, st)| json!({
+                "id": sp, "name": self.species.get(*sp).common_name,
+                "n": st.n, "infected": st.infected, "recovered": st.recovered,
+                "resistance": st.res(),
+                "virulence": st.virulence(), "transmissibility": st.transmissibility(),
+                "deaths": d.species_deaths.get(sp).copied().unwrap_or(0),
+            })).collect::<Vec<_>>(),
+            // Per species: [year, hosts, infected, peak infected since the last point,
+            // recovered, R1–R4 frequency, mean virulence, mean transmissibility, deaths].
+            "series": d.series.iter().filter(|(sp, _)| alive.contains(sp)).map(|(sp, v)| (sp.to_string(), json!(v.iter().map(|x| vec![
+                x.year, x.n as f64, x.infected as f64, x.peak as f64, x.recovered as f64,
+                x.res[0] as f64, x.res[1] as f64, x.res[2] as f64, x.res[3] as f64,
+                x.virulence as f64, x.transmissibility as f64, x.deaths as f64,
+            ]).collect::<Vec<_>>()))).collect::<serde_json::Map<String, Value>>(),
         })
     }
 
@@ -390,6 +459,8 @@ impl Simulation {
             // Water surface (m): a lake's level, otherwise the ground.
             "water_level" => hydrology::priority_flood(w).0,
             "density" => self.density(None),
+            // Share of hosts infected (PRD FR-L12); −1 where nobody lives.
+            "disease" => self.disease_layer(),
             _ => vec![0.0; n],
         }
     }
@@ -510,7 +581,7 @@ impl Simulation {
 
     /// The demes counted in the current mode (Individual mode counts only those held
     /// outside the focus region; the rest are animals).
-    fn counted_demes(&self) -> &[crate::population::Deme] {
+    pub(crate) fn counted_demes(&self) -> &[crate::population::Deme] {
         match self.mode {
             Mode::Individual => &self.frozen,
             Mode::Population | Mode::Macro => &self.demes,

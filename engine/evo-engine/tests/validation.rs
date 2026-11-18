@@ -7,6 +7,7 @@
 use evo_engine::explain::drift_test;
 use evo_engine::genetics::{AlleleTable, FounderSpec, Genome, GenomeArch};
 use evo_engine::population::multinomial_resample;
+use evo_engine::record::EventKind;
 use evo_engine::rng::Rng;
 use evo_engine::traits::{Trait, N_TRAITS};
 use evo_engine::world::{LandShape, WorldGenParams};
@@ -1899,7 +1900,7 @@ fn with_nature_off_worlds_are_unchanged() {
         .any(|e| e.kind == evo_engine::record::EventKind::Nature));
     // A version 6 save (no nature section) loads with nature off.
     let bytes = a.save_bytes().unwrap();
-    let tail = bincode::serialize(&a.nature).unwrap().len();
+    let tail = bincode::serialize(&a.nature).unwrap().len() + disease_section_len(&a);
     let mut v6 = bytes[..bytes.len() - tail].to_vec();
     v6[4..8].copy_from_slice(&6u32.to_le_bytes());
     let old = Simulation::load_bytes(&v6).unwrap();
@@ -1938,4 +1939,331 @@ fn templates_keep_climate_cycles_and_natural_events() {
         ..t.new_world()
     })
     .is_err());
+}
+
+// ---- Disease and co-evolution (PRD FR-L12, FR-G14) ------------------------------------
+
+/// Bytes of the (empty) disease section at the end of a save of a world without pathogens.
+fn disease_section_len(sim: &Simulation) -> usize {
+    assert!(!sim.disease.active);
+    type Demes = Vec<Option<evo_engine::disease::DemeHealth>>;
+    bincode::serialize(&(
+        &sim.disease,
+        Vec::<evo_engine::disease::Health>::new(),
+        Demes::new(),
+        Demes::new(),
+    ))
+    .unwrap()
+    .len()
+}
+
+fn pathogen(virulence: f32, transmissibility: f32, trade_off: bool) -> evo_engine::PathogenSpec {
+    evo_engine::PathogenSpec {
+        virulence,
+        transmissibility,
+        trade_off,
+        share: 0.02,
+    }
+}
+
+fn seeded(p: evo_engine::PathogenSpec, share: f32) -> evo_engine::PathogenSpec {
+    evo_engine::PathogenSpec { share, ..p }
+}
+
+fn outbreak(s: &mut Simulation, species: u32, p: evo_engine::PathogenSpec) {
+    s.apply(evo_engine::Intervention::Outbreak {
+        species,
+        pathogen: p,
+    })
+    .unwrap();
+}
+
+fn earth(seed: u64) -> Simulation {
+    Simulation::new(NewWorld {
+        template: "earth".into(),
+        seed,
+        gen: None,
+        founders: None,
+        realism: None,
+        label: None,
+        edits: vec![],
+        designs: vec![],
+        nature: None,
+    })
+    .unwrap()
+}
+
+/// The most numerous species.
+fn commonest(s: &Simulation) -> u32 {
+    *s.species_counts()
+        .iter()
+        .max_by_key(|x| (*x.1, std::cmp::Reverse(*x.0)))
+        .unwrap()
+        .0
+}
+
+/// In a dense host population a strain with R₀ > 1 causes an epidemic and one with
+/// R₀ < 1 dies out, in both Individual and Population mode.
+#[test]
+fn r0_above_one_spreads_and_below_one_dies_out() {
+    // Individual mode: 300 hares in the Blank Slate.
+    for (t, spreads) in [(0.9, true), (0.15, false)] {
+        let mut s = blank(5);
+        s.run_steps(24 * 20);
+        let n = s.population();
+        outbreak(&mut s, 0, pathogen(0.3, t, true));
+        let st = s.disease.strains[0].clone();
+        let r0 = s.r0_estimate(0, &st);
+        let seeded = s.disease.cases;
+        s.run_steps(24 * 90);
+        let cases = s.disease.cases;
+        eprintln!("Individual t {t}: R0 {r0:.2}, {seeded} seeded, {cases} cases among {n}");
+        if spreads {
+            assert!(r0 > 1.5, "R0 {r0}");
+            assert!(cases as f64 > 0.3 * n as f64, "{cases} cases");
+            assert!(s.disease.deaths > 20);
+            assert!(s
+                .events
+                .iter()
+                .any(|e| e.kind == EventKind::Disease && e.text.starts_with("Epidemic")));
+        } else {
+            assert!(r0 < 0.8, "R0 {r0}");
+            assert!(cases < 8 * seeded, "{cases} cases");
+            assert_eq!(
+                s.host_stats()[&0].infected,
+                0,
+                "the pathogen should die out"
+            );
+            assert!(s.events.iter().any(|e| e.text.contains("died out")));
+        }
+    }
+    // Population mode: the commonest species on Earth.
+    for (t, spreads) in [(0.6, true), (0.08, false)] {
+        let mut s = earth(5);
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(20.0);
+        let sp = commonest(&s);
+        outbreak(&mut s, sp, seeded(pathogen(0.3, t, true), 0.002));
+        let r0 = s.r0_estimate(sp, &s.disease.strains[0].clone());
+        let seeded = s.disease.cases;
+        s.run_years(5.0);
+        let cases = s.disease.cases;
+        eprintln!("Population t {t}: R0 {r0:.2}, {seeded} seeded, {cases} cases");
+        if spreads {
+            assert!(r0 > 1.2, "R0 {r0}");
+            assert!(cases > 50 * seeded, "{cases} cases");
+        } else {
+            assert!(r0 < 0.8, "R0 {r0}");
+            assert!(cases < 3 * seeded, "{cases} cases");
+            assert_eq!(s.host_stats()[&sp].infected, 0);
+        }
+    }
+}
+
+/// An epidemic selects for the resistant alleles (several seeds, Population mode).
+#[test]
+fn resistance_rises_after_an_epidemic() {
+    for seed in [5, 6, 7] {
+        let mut s = blank(seed);
+        s.run_steps(24 * 20);
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(10.0);
+        outbreak(&mut s, 0, seeded(pathogen(0.9, 0.9, true), 0.002));
+        let before = s.host_stats()[&0].res();
+        s.run_years(3.0);
+        let after = s.host_stats()[&0].res();
+        let mean = |r: [f32; 4]| r.iter().sum::<f32>() / 4.0;
+        eprintln!(
+            "seed {seed}: resistance {:.3} → {:.3}, {} deaths",
+            mean(before),
+            mean(after),
+            s.disease.deaths
+        );
+        assert!(s.disease.deaths > 1000);
+        assert!(
+            mean(after) > mean(before) * 1.15,
+            "seed {seed}: {before:?} → {after:?}"
+        );
+        assert!(
+            (0..4).filter(|&i| after[i] > before[i]).count() >= 3,
+            "seed {seed}: {before:?} → {after:?}"
+        );
+    }
+    // Without disease the alleles' small cost slowly lowers them.
+    let mut s = blank(5);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(5.0);
+    outbreak(&mut s, 0, pathogen(0.01, 0.01, false));
+    let before = s.host_stats()[&0].res();
+    s.run_years(60.0);
+    let after = s.host_stats()[&0].res();
+    assert!(
+        after.iter().sum::<f32>() < before.iter().sum::<f32>(),
+        "{before:?} → {after:?}"
+    );
+}
+
+/// With the virulence–transmission trade-off, virulence evolves towards an intermediate
+/// value from either side; without it, milder strains win.
+#[test]
+fn virulence_evolves_towards_an_intermediate_value() {
+    let evolve = |v: f32, trade_off: bool| {
+        let mut s = earth(5);
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(20.0);
+        let sp = commonest(&s);
+        outbreak(&mut s, sp, seeded(pathogen(v, 0.6, trade_off), 0.002));
+        s.run_years(60.0);
+        let st = &s.host_stats()[&sp];
+        assert!(st.infected > 0, "the pathogen should persist");
+        assert!(s.disease.strains.len() > 3, "new strains should appear");
+        st.virulence()
+    };
+    let from_high = evolve(0.9, true);
+    let from_low = evolve(0.05, true);
+    let without = evolve(0.5, false);
+    eprintln!(
+        "virulence: 0.9 → {from_high:.3}, 0.05 → {from_low:.3}; no trade-off 0.5 → {without:.3}"
+    );
+    assert!((0.2..0.7).contains(&from_high), "{from_high}");
+    assert!((0.2..0.7).contains(&from_low), "{from_low}");
+    assert!((from_high - from_low).abs() < 0.3);
+    assert!(without < 0.4, "{without}");
+}
+
+/// Switching between Individual and Population mode keeps every strain's infected count
+/// and the recovered count.
+#[test]
+fn infected_counts_survive_mode_switches() {
+    let mut s = blank(5);
+    s.run_steps(24 * 20);
+    outbreak(&mut s, 0, pathogen(0.3, 0.9, true));
+    s.run_steps(24 * 25);
+    let counts = |s: &Simulation| {
+        let st = &s.host_stats()[&0];
+        (st.by_strain.clone(), st.recovered, st.n)
+    };
+    let before = counts(&s);
+    assert!(before.0.values().sum::<u64>() > 10, "{before:?}");
+    s.set_mode(Mode::Population).unwrap();
+    assert_eq!(counts(&s), before, "I → P");
+    s.set_mode(Mode::Individual).unwrap();
+    assert_eq!(counts(&s), before, "P → I");
+    // A focus region holds the rest as demes with their infections.
+    s.set_mode(Mode::Population).unwrap();
+    s.focus_region(0, 0, 15, 15).unwrap();
+    assert_eq!(counts(&s), before, "focus");
+    s.set_mode(Mode::Population).unwrap();
+    assert_eq!(counts(&s), before, "leaving the focus");
+    s.run_years(1.0);
+    s.set_mode(Mode::Individual).unwrap();
+    s.run_steps(24 * 10);
+}
+
+/// Disease replays exactly: two runs, the replay log, and a save and load mid-epidemic.
+#[test]
+fn disease_is_deterministic_and_replays_identically() {
+    let run = |s: &mut Simulation| {
+        s.run_steps(24 * 20);
+        outbreak(s, 0, pathogen(0.4, 0.9, true));
+        s.run_steps(24 * 40);
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(10.0);
+    };
+    let mut a = blank(9);
+    run(&mut a);
+    let mut b = blank(9);
+    run(&mut b);
+    assert_eq!(a.state_hash(), b.state_hash());
+    assert!(a.disease.cases > 50);
+    let r = evo_engine::Replay::run(a.replay_script().unwrap()).unwrap();
+    assert!(r.matches());
+
+    let mut half = blank(9);
+    half.run_steps(24 * 20);
+    outbreak(&mut half, 0, pathogen(0.4, 0.9, true));
+    half.run_steps(24 * 20);
+    assert!(half.host_stats()[&0].infected > 0);
+    let mut loaded = Simulation::load_bytes(&half.save_bytes().unwrap()).unwrap();
+    assert_eq!(loaded.state_hash(), half.state_hash());
+    assert_eq!(loaded.disease, half.disease);
+    loaded.run_steps(24 * 20);
+    loaded.set_mode(Mode::Population).unwrap();
+    loaded.run_years(10.0);
+    assert_eq!(loaded.state_hash(), a.state_hash());
+    // And in Population mode.
+    let mut p = Simulation::load_bytes(&a.save_bytes().unwrap()).unwrap();
+    p.run_years(5.0);
+    a.run_years(5.0);
+    assert_eq!(p.state_hash(), a.state_hash());
+}
+
+/// Worlds without pathogens save and hash as before, and a version 7 save loads with no
+/// pathogens.
+#[test]
+fn old_saves_load_with_no_pathogens() {
+    let mut a = blank(5);
+    a.run_steps(24 * 10);
+    a.apply(evo_engine::Intervention::Plague {
+        species: 0,
+        mortality: 0.3,
+    })
+    .unwrap();
+    a.set_mode(Mode::Population).unwrap();
+    a.run_years(20.0);
+    assert!(!a.disease.active);
+    assert!(a.animals.iter().all(|x| x.health == Default::default()));
+    let bytes = a.save_bytes().unwrap();
+    let tail = disease_section_len(&a);
+    assert!(
+        tail < 200,
+        "an empty disease section is small ({tail} bytes)"
+    );
+    let mut v7 = bytes[..bytes.len() - tail].to_vec();
+    v7[4..8].copy_from_slice(&7u32.to_le_bytes());
+    let old = Simulation::load_bytes(&v7).unwrap();
+    assert_eq!(old.state_hash(), a.state_hash());
+    assert!(!old.disease.active);
+    // A bad pathogen is refused and changes nothing.
+    let mut c = blank(5);
+    let h = c.state_hash();
+    assert!(c
+        .apply(evo_engine::Intervention::Outbreak {
+            species: 0,
+            pathogen: pathogen(2.0, 0.5, true),
+        })
+        .is_err());
+    assert!(c
+        .apply(evo_engine::Intervention::Outbreak {
+            species: 7,
+            pathogen: pathogen(0.5, 0.5, true),
+        })
+        .is_err());
+    assert_eq!(c.state_hash(), h);
+    assert!(!c.disease.active);
+}
+
+/// "Why?" puts a crash down to the epidemic that caused it.
+#[test]
+fn why_names_an_epidemic() {
+    let mut s = earth(6);
+    s.set_mode(Mode::Population).unwrap();
+    s.run_years(20.0);
+    let sp = commonest(&s);
+    outbreak(&mut s, sp, seeded(pathogen(0.9, 0.6, true), 0.002));
+    s.run_years(3.0);
+    let crash = s
+        .events
+        .iter()
+        .position(|e| e.kind == EventKind::Crash && e.species == Some(sp))
+        .expect("the epidemic causes a crash");
+    let why = s.why_json(crash);
+    eprintln!("{why}");
+    assert_eq!(why["cause"], "disease");
+    assert!(why["summary"].as_str().unwrap().contains("epidemic of P1"));
+    assert!(why["numbers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n[0] == "Hazard: disease"));
 }

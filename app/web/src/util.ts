@@ -114,6 +114,15 @@ export const VEG_RAMP: RGB[] = [
   [30, 110, 40],
 ];
 
+/** Share of hosts infected, 0 to 1 (drawn on a square-root scale). */
+export const DISEASE_RAMP: RGB[] = [
+  [255, 247, 236],
+  [253, 212, 158],
+  [252, 141, 89],
+  [215, 48, 31],
+  [127, 0, 0],
+];
+
 /** Allele frequency, 0 to 1. */
 export const ALLELE_RAMP: RGB[] = [
   [68, 1, 84],
