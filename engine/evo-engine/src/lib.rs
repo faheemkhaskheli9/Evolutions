@@ -15,7 +15,7 @@
 //! use evo_engine::{NewWorld, Simulation};
 //! let mut sim = Simulation::new(NewWorld {
 //!     template: "blank".into(), seed: 1, gen: None, founders: None, realism: None,
-//!     label: None, edits: vec![], designs: vec![],
+//!     label: None, edits: vec![], designs: vec![], nature: None,
 //! }).unwrap();
 //! sim.run_steps(24);
 //! assert!(sim.population() > 0);
@@ -26,12 +26,14 @@
 pub mod animal;
 pub mod api;
 pub mod designer;
+pub mod disease;
 pub mod editor;
 pub mod explain;
 pub mod export;
 pub mod genetics;
 pub mod individual;
 pub mod macro_mode;
+pub mod nature;
 pub mod noise;
 pub mod params;
 pub mod physiology;
@@ -49,6 +51,8 @@ pub mod user_template;
 pub mod world;
 
 pub use designer::SpeciesDesign;
+pub use disease::PathogenSpec;
+pub use nature::{GlacialCycle, NatureSettings};
 pub use params::{Realism, SimParams};
 pub use replay::{Replay, ReplayScript};
 pub use sim::{Intervention, Mode, NewWorld, Simulation};

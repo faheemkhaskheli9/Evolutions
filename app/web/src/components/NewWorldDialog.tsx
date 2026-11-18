@@ -1,6 +1,7 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import { templateConfig, type AutosaveInfo, type Catalog, type FounderGroup, type LandShape, type NewWorldConfig, type SpeciesDesign, type StoredTemplate, type WorldGenParams } from "../engine/protocol";
+import { DEFAULT_GLACIAL, templateConfig, type AutosaveInfo, type Catalog, type FounderGroup, type LandShape, type NatureSettings, type NewWorldConfig, type SpeciesDesign, type StoredTemplate, type WorldGenParams } from "../engine/protocol";
+import { NO_NATURE, natureConfig } from "./nature";
 import { designsUsed, mergeDesigns } from "../engine/designs";
 import { templateFileName } from "../engine/userTemplates";
 import { downloadBlob, rgb } from "../util";
@@ -105,6 +106,56 @@ function WorldSettings({ gen, set }: { gen: WorldGenParams; set: (patch: Partial
   );
 }
 
+/** Climate cycles and natural events (PRD FR-W7, FR-E3); each can be turned on or off. */
+function NatureForm({ nature, set }: { nature: NatureSettings; set: (n: NatureSettings) => void }) {
+  const g = nature.glacial;
+  const box = (key: "droughts" | "fires" | "harsh_winters" | "eruptions", label: string, title: string) => (
+    <label className="row gap" title={title}>
+      <input type="checkbox" checked={nature[key]} onChange={(e) => set({ ...nature, [key]: e.target.checked })} />
+      {label}
+    </label>
+  );
+  const cycle = (patch: Partial<NonNullable<NatureSettings["glacial"]>>) => g && set({ ...nature, glacial: { ...g, ...patch } });
+  return (
+    <fieldset className="nature">
+      <legend>Climate and natural events</legend>
+      <p className="muted small">Off by default. When on, the climate changes on its own and every change is logged in the Chronicle.</p>
+      <label className="row gap" title="Slow cooling into an ice age, then a fast warming. The sea falls and rises with it, so coastlines move and land bridges open and close.">
+        <input type="checkbox" checked={!!g} onChange={(e) => set({ ...nature, glacial: e.target.checked ? { ...DEFAULT_GLACIAL } : null })} />
+        Glacial cycles (ice ages and sea level)
+      </label>
+      {g && (
+        <div className="settings">
+          <label className="setting">
+            <span>
+              Cycle length <b>{g.period_years.toLocaleString()} years</b>
+            </span>
+            <input type="range" min={3} max={6} step={0.25} value={Math.log10(g.period_years)} onChange={(e) => cycle({ period_years: Math.round(10 ** Number(e.target.value) / 1000) * 1000 })} aria-label="Cycle length" />
+          </label>
+          <label className="setting">
+            <span>
+              Cooling at the glacial maximum <b>{g.cooling_c.toFixed(1)} °C</b>
+            </span>
+            <input type="range" min={0} max={15} step={0.5} value={g.cooling_c} onChange={(e) => cycle({ cooling_c: Number(e.target.value) })} aria-label="Glacial cooling" />
+          </label>
+          <label className="setting">
+            <span>
+              Sea-level fall <b>{g.sea_drop_m.toFixed(0)} m</b>
+            </span>
+            <input type="range" min={0} max={300} step={10} value={g.sea_drop_m} onChange={(e) => cycle({ sea_drop_m: Number(e.target.value) })} aria-label="Sea-level fall" />
+          </label>
+        </div>
+      )}
+      <div className="row wrap gap">
+        {box("droughts", "Droughts", "A region gets much less rain for 2–6 years.")}
+        {box("fires", "Wildfires", "A region's vegetation burns, then grows back.")}
+        {box("harsh_winters", "Harsh winters", "A region's winter is several degrees colder for a year.")}
+        {box("eruptions", "Volcanic eruptions", "A region cools for two years; life near the vent dies.")}
+      </div>
+    </fieldset>
+  );
+}
+
 export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore, onClose, busy, templates, onSaveTemplate, onImportTemplate, onRemoveTemplate, designs, onDesign, onRemoveDesign }: Props) {
   const first = catalog.templates[0];
   const [template, setTemplate] = useState(first?.key ?? "earth");
@@ -114,6 +165,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
   const [customise, setCustomise] = useState(false);
   const [gen, setGen] = useState<WorldGenParams>(() => ({ ...(first?.gen ?? catalog.default_gen) }));
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [nature, setNature] = useState<NatureSettings>(NO_NATURE);
 
   const userTemplate = templates.find((t) => userKey(t.id) === template) ?? null;
   /** Designs founders can use: the user's, and the chosen template's (which win on a shared key). */
@@ -128,6 +180,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
       setGen(cfg.gen ?? catalog.default_gen);
       setSeed(cfg.seed);
       setRealism(own.template.realism);
+      setNature(own.template.nature ? { ...NO_NATURE, ...own.template.nature } : NO_NATURE);
       return;
     }
     const t = catalog.templates.find((x) => x.key === key);
@@ -144,6 +197,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
     label: userTemplate ? userTemplate.template.name : null,
     edits: userTemplate?.template.edits ?? [],
     designs: designsUsed(founders, available),
+    nature: natureConfig(nature),
   });
   const latOk = gen.lat_north > gen.lat_south;
 
@@ -276,6 +330,7 @@ export function NewWorldDialog({ catalog, onCreate, onLoad, autosave, onRestore,
         </label>
         {customise && <WorldSettings gen={gen} set={(patch) => setGen((g) => ({ ...g, ...patch }))} />}
         {customise && !latOk && <p className="small error-text">The north edge must be north of the south edge.</p>}
+        <NatureForm nature={nature} set={setNature} />
         <h3>Founders</h3>
         <table className="founders">
           <thead>

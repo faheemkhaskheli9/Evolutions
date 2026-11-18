@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineClient } from "./engine/client";
 import { templateFileName } from "./engine/userTemplates";
-import type { AlleleInfo, AutosaveInfo, Brush, Catalog, CompareSide, DesignReport, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDesign, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
+import type { AlleleInfo, AutosaveInfo, Brush, Catalog, Climate, CompareSide, Disease, DesignReport, FromWorker, Hydrology, ModeChoice, NewWorldConfig, SimEvent, SpeciesDesign, SpeciesDetail, SpeciesInfo, Status, StoredTemplate, Why, WorldInfo } from "./engine/protocol";
 import { designFromLibrary, loadDesigns, mergeDesigns, storeDesigns } from "./engine/designs";
 import { SpeciesDesigner } from "./components/SpeciesDesigner";
 import { CompareBranches } from "./components/CompareBranches";
@@ -57,6 +57,10 @@ export default function App() {
   const [speed, setSpeed] = useState(SPEEDS[1].value);
   const [species, setSpecies] = useState<SpeciesInfo[]>([]);
   const [events, setEvents] = useState<SimEvent[]>([]);
+  /** Climate cycles and natural events (PRD FR-W7, FR-E3), for worlds that have them. */
+  const [climate, setClimate] = useState<Climate | null>(null);
+  /** Pathogens and host resistance (PRD FR-L12, FR-G14), once one has been introduced. */
+  const [disease, setDisease] = useState<Disease | null>(null);
   const [checkpoints, setCheckpoints] = useState<{ list: CheckpointInfo[]; bytes: number; budget: number }>({ list: [], bytes: 0, budget: 0 });
   const [tab, setTab] = useState<Tab>("species");
   const [selectedSpecies, setSelectedSpecies] = useState<number | null>(null);
@@ -131,6 +135,8 @@ export default function App() {
         case "created":
           setWorld({ info: m.world, elevation: m.elevation, biome: m.biome, water: m.water, hydro: m.hydro });
           setEvents([]);
+          setClimate(null);
+          setDisease(null);
           setWhys({});
           setTraitWhy(null);
           setSpecies([]);
@@ -187,6 +193,8 @@ export default function App() {
           setAchieved(m.achievedSpeed);
           if (m.events.length) setEvents((e) => [...e, ...m.events].slice(-2000));
           if (m.speciesList) setSpecies(m.speciesList);
+          if (m.climate) setClimate(m.climate);
+          if (m.disease) setDisease(m.disease);
           break;
         }
         case "progress":
@@ -326,7 +334,9 @@ export default function App() {
             ? "temperature"
             : layer === "rainfall"
               ? "precip"
-              : "forage";
+              : layer === "disease"
+                ? "disease"
+                : "forage";
     layerKind.current = kind;
     if (!kind) return;
     client.send({ type: "layer", kind });
@@ -644,6 +654,7 @@ export default function App() {
                 setTrait={setChartTrait}
                 traitWhy={shownTraitWhy}
                 onExplainTrait={explainTrait}
+                events={events}
               />
             )}
             {tab === "tree" && (
@@ -683,6 +694,9 @@ export default function App() {
             )}
             {tab === "world" && (
               <WorldPanel
+                climate={climate}
+                disease={disease}
+                events={events}
                 catalog={catalog}
                 status={status}
                 species={species}

@@ -536,6 +536,7 @@ impl Simulation {
                 males: vec![0; AGE_CLASSES],
                 freqs: vec![],
                 condition: c.food.min(1.0),
+                health: None,
             };
             for age in 0..AGE_CLASSES {
                 d.females[age] = rng.poisson(c.f[age]).min(u32::MAX as u64 / 4) as u32;
@@ -545,6 +546,7 @@ impl Simulation {
                 continue;
             }
             d.freqs = old[c.src].freqs.clone();
+            d.health = old[c.src].health.clone();
             keep.push(i);
             demes.push(d);
         }
@@ -593,6 +595,10 @@ impl Simulation {
                         males: vec![0; AGE_CLASSES],
                         freqs: src.freqs.clone(),
                         condition: src.condition,
+                        health: src.health.as_ref().map(|h| crate::disease::DemeHealth {
+                            res: h.res,
+                            ..Default::default()
+                        }),
                     };
                     d.females[1] = 1;
                     d.males[1] = 1;

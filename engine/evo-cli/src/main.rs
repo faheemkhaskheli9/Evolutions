@@ -29,6 +29,10 @@ fn usage() -> ! {
                                for stretches of 20,000 years or more)
       --individual-years <f64> years to watch individually before switching in auto mode (default 1)
       --strict                 literature mutation rates instead of accelerated
+      --nature <list>          climate cycles and natural events for a new world: all, or
+                               any of glacial, droughts, fires, winters, eruptions
+                               (comma-separated); default none
+      --glacial-period <years> length of the glacial cycle (default 100000)
       --load <file.evo>        continue a saved run instead of creating one
       --out <file.evo>         save the final state
       --csv <dir>              write per-species metrics CSV files (trait means and SDs)
@@ -69,6 +73,8 @@ const RUN_OPTIONS: &[&str] = &[
     "mode",
     "individual-years",
     "strict",
+    "nature",
+    "glacial-period",
     "load",
     "out",
     "csv",
@@ -79,6 +85,30 @@ const RUN_OPTIONS: &[&str] = &[
     "quiet",
     "debug",
 ];
+
+/// Climate cycles and natural events from `--nature` and `--glacial-period`.
+fn nature_settings(o: &HashMap<String, String>) -> Option<evo_engine::NatureSettings> {
+    let list = o.get("nature")?;
+    let mut n = evo_engine::NatureSettings::default();
+    for part in list.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        match part {
+            "all" => n = evo_engine::NatureSettings::all(),
+            "glacial" => n.glacial = Some(Default::default()),
+            "droughts" => n.droughts = true,
+            "fires" => n.fires = true,
+            "winters" => n.harsh_winters = true,
+            "eruptions" => n.eruptions = true,
+            _ => {
+                eprintln!("unknown --nature item '{part}'");
+                std::process::exit(2)
+            }
+        }
+    }
+    if let Some(c) = n.glacial.as_mut() {
+        c.period_years = num(o, "glacial-period", c.period_years);
+    }
+    Some(n)
+}
 
 /// Parses `--key value`, exiting with a message (rather than silently using the default)
 /// when the value is present but malformed.
@@ -164,7 +194,7 @@ fn main() {
                 usage();
             }
             if o.contains_key("template-file") {
-                for k in ["template", "strict", "load"] {
+                for k in ["template", "strict", "load", "nature", "glacial-period"] {
                     if o.contains_key(k) {
                         eprintln!("--template-file cannot be combined with --{k}");
                         std::process::exit(2)
@@ -223,6 +253,7 @@ fn main() {
                     label: None,
                     edits: vec![],
                     designs: vec![],
+                    nature: nature_settings(&o),
                 })
                 .unwrap_or_else(|e| {
                     eprintln!("{e}");

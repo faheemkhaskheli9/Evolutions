@@ -1,8 +1,11 @@
 // Map images shared by the flat map and the 3D world: one pixel per tile.
 import type { WorldInfo } from "../engine/protocol";
-import { ALLELE_RAMP, BIOME_COLORS, RAIN_RAMP, ramp, TEMP_RAMP, VEG_RAMP, type RGB } from "../util";
+import { ALLELE_RAMP, BIOME_COLORS, DISEASE_RAMP, RAIN_RAMP, ramp, TEMP_RAMP, VEG_RAMP, type RGB } from "../util";
 
-export type Layer = "terrain" | "temperature" | "rainfall" | "vegetation" | "population" | "alleles";
+export type Layer = "terrain" | "temperature" | "rainfall" | "vegetation" | "population" | "alleles" | "disease";
+
+/** Prevalence at which the disease layer reaches its darkest colour. */
+export const DISEASE_FULL = 0.3;
 
 /**
  * Terrain image: biome colours with hillshading, water by depth. With `rivers` false,
@@ -64,9 +67,10 @@ export function scalarPixels(world: Pick<WorldInfo, "w" | "h">, data: Float32Arr
     if (layer === "temperature") col = ramp(TEMP_RAMP, (v + 25) / 60);
     else if (layer === "rainfall") col = ramp(RAIN_RAMP, Math.sqrt(Math.max(0, v) / 3500));
     else {
-      // Vegetation: -1 where nothing grows. Allele frequency: -1 where the species is absent.
+      // Vegetation: -1 where nothing grows. Allele frequency and disease: -1 where nobody lives.
       if (v < 0) continue;
-      col = ramp(layer === "alleles" ? ALLELE_RAMP : VEG_RAMP, v);
+      if (layer === "disease") col = ramp(DISEASE_RAMP, Math.sqrt(Math.min(1, v / DISEASE_FULL)));
+      else col = ramp(layer === "alleles" ? ALLELE_RAMP : VEG_RAMP, v);
     }
     px[i * 4] = col[0];
     px[i * 4 + 1] = col[1];

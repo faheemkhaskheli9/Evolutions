@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALLELE_RAMP, BIOME_COLORS, TEMP_RAMP, VEG_RAMP, type RGB } from "../util";
+import { ALLELE_RAMP, BIOME_COLORS, DISEASE_RAMP, TEMP_RAMP, VEG_RAMP, type RGB } from "../util";
 import { demePixels, scalarPixels, snowPixels, terrainPixels, worldCopies } from "./mapLayers";
 
 const px = (data: Uint8ClampedArray, i: number) => Array.from(data.slice(i * 4, i * 4 + 4));
@@ -49,6 +49,11 @@ describe("scalarPixels", () => {
   it("leaves tiles with no vegetation, or without the species, clear", () => {
     expect(px(scalarPixels(world, f32(0, -1, 1), "vegetation", water), 1)).toEqual([0, 0, 0, 0]);
     expect(px(scalarPixels(world, f32(0, -1, 1), "alleles", water), 1)).toEqual([0, 0, 0, 0]);
+  });
+  it("draws disease on a square-root scale up to 30% infected", () => {
+    expect(px(scalarPixels(world, f32(0, -1, 0), "disease", water), 1)).toEqual([0, 0, 0, 0]);
+    expect(px(scalarPixels(world, f32(0, 0, 0.5), "disease", water), 1)).toEqual(rgba(DISEASE_RAMP[0], 200));
+    expect(px(scalarPixels(world, f32(0, 0, 0.5), "disease", water), 2)).toEqual(rgba(DISEASE_RAMP[DISEASE_RAMP.length - 1], 200));
   });
   it("uses the allele ramp for allele frequency and the vegetation ramp otherwise", () => {
     expect(px(scalarPixels(world, f32(0, 0, 1), "alleles", water), 2)).toEqual(rgba(ALLELE_RAMP[ALLELE_RAMP.length - 1], 200));

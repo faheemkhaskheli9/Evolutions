@@ -118,7 +118,7 @@ pub struct Why {
     /// For trait shifts: "selection", "drift" or "mixed".
     pub verdict: Option<String>,
     /// Main cause, as a key: a driver ("cold stress", …), "food", "predator",
-    /// "climate", "intervention", "reproduction", "allopatric" or "parapatric".
+    /// "climate", "nature", "disease", "intervention", "reproduction", "allopatric" or "parapatric".
     pub cause: Option<String>,
     /// The chart that shows it: "trait:<key>", "population", "popgen" or "tree".
     pub chart: Option<String>,
@@ -328,6 +328,28 @@ struct Pooled {
 }
 
 impl Simulation {
+    /// The pathogen named in the latest outbreak or epidemic report for a species since
+    /// `since` (or before it, if none since).
+    fn pathogen_named(&self, species: u32, since: f64) -> Option<String> {
+        let name = |t: &str| {
+            t.strip_prefix("Epidemic: ")
+                .or_else(|| t.strip_prefix("Outbreak of "))
+                .and_then(|r| r.split_whitespace().next())
+                .filter(|n| n.starts_with('P'))
+                .map(str::to_string)
+        };
+        let reports = || {
+            self.events
+                .iter()
+                .rev()
+                .filter(|e| e.kind == EventKind::Disease && e.species == Some(species))
+        };
+        reports()
+            .take_while(|e| e.year >= since - 1.0)
+            .find_map(|e| name(&e.text))
+            .or_else(|| reports().find_map(|e| name(&e.text)))
+    }
+
     /// Counts a death in Individual mode (see `DeathAcc`).
     pub(crate) fn note_death(&mut self, i: usize, cause: Cause) {
         let Some(k) = driver_of(cause) else {
@@ -946,6 +968,25 @@ impl Simulation {
                 ));
             }
         }
+        // Deaths from infection (PRD FR-L12), as a hazard like the others: around the
+        // peak, now and since the peak.
+        let span = |xs: &[&Demog], prev: Option<&&Demog>| {
+            let to = xs.last().map_or(year, |d| d.year);
+            let from = prev.map_or(xs.first().map_or(year, |d| d.year) - 1.0, |d| d.year);
+            self.disease.hazard(species, from, to)
+        };
+        let before_slice = &head[peak.saturating_sub(1)..(peak + 2).min(head.len())];
+        let sick_before = span(before_slice, head.get(peak.wrapping_sub(2)));
+        let sick_now = span(&v[v.len() - tail..], v.get(v.len() - tail - 1));
+        let sick_during = span(&v[peak + 1..], v.get(peak));
+        let sick = self.disease.deaths_between(species, t0, year);
+        if sick > 0 {
+            numbers.push((
+                "Hazard: disease".into(),
+                format!("{sick_before:.3} → {sick_now:.3} per year"),
+            ));
+            numbers.push(("Deaths from disease".into(), fmt_n(sick as f64)));
+        }
         if before.food >= 0.0 && now.food >= 0.0 {
             numbers.push((
                 "Food (intake ÷ need)".into(),
@@ -997,6 +1038,14 @@ impl Simulation {
                 .unwrap_or(0);
         }
         let high = persistent && during.hazard[k] > 0.1;
+        // Disease, when its hazard rose most (or, if none rose, stayed highest).
+        let epidemic = sick > 0
+            && if persistent {
+                sick_now - sick_before > 0.02
+                    || (sick_during > during.hazard[k] && sick_during > 0.1)
+            } else {
+                sick_now - sick_before > rise.max(0.02)
+            };
         let fec_ratio = if before.fecundity > 0.0 && now.fecundity >= 0.0 {
             now.fecundity / before.fecundity
         } else {
@@ -1009,13 +1058,55 @@ impl Simulation {
                 format!("rising {what}")
             }
         };
+        let glacial = self
+            .nature
+            .settings
+            .as_ref()
+            .is_some_and(|n| n.glacial.is_some());
         let iv = if climate_intervention {
             ", your intervention"
+        } else if glacial {
+            ", the glacial cycle"
         } else {
             ""
         };
+        // Natural events that reached the species' range (PRD FR-E3).
+        use crate::nature::NatureKind;
+        let natural = self.natural_events_over(species, t0 - 1.0, year);
+        let describe = |e: &crate::nature::PastEvent| {
+            format!(
+                "{} around {} (year {:.0})",
+                e.kind.label().to_lowercase(),
+                crate::nature::place(&self.world, e.centre as usize),
+                e.year
+            )
+        };
+        let food_event = natural
+            .iter()
+            .find(|e| matches!(e.kind, NatureKind::Drought | NatureKind::Wildfire))
+            .map(|e| describe(e));
+        let cold_event = natural
+            .iter()
+            .find(|e| matches!(e.kind, NatureKind::HarshWinter | NatureKind::Eruption))
+            .map(|e| describe(e));
+        for e in natural.iter().take(4) {
+            points.push(format!("A {} reached its range.", describe(e)));
+        }
         let (cause, because) = if let Some(iv) = intervention {
             ("intervention".to_string(), format!("an intervention: {iv}"))
+        } else if epidemic {
+            let pathogen = self.pathogen_named(species, t0);
+            (
+                "disease".to_string(),
+                format!(
+                    "an epidemic{}: deaths from infection {} from {:.3} to {:.3} per year ({} died)",
+                    pathogen.map(|p| format!(" of {p}")).unwrap_or_default(),
+                    if sick_now > sick_before { "rose" } else { "stayed high, going" },
+                    sick_before,
+                    sick_now,
+                    fmt_n(sick as f64)
+                ),
+            )
         } else if persistent && fec_ratio < 0.6 {
             (
                 "reproduction".to_string(),
@@ -1041,6 +1132,17 @@ impl Simulation {
                     };
                     ("predator".to_string(), who)
                 }
+                0 | 1 if food_event.is_some() => (
+                    "nature".to_string(),
+                    format!(
+                        "a {} that cut its food and water",
+                        food_event.clone().unwrap_or_default()
+                    ),
+                ),
+                4 if cold_event.is_some() => (
+                    "nature".to_string(),
+                    format!("cold from a {}", cold_event.clone().unwrap_or_default()),
+                ),
                 0 if dclimate.abs() >= 0.5 => (
                     "climate".to_string(),
                     format!("a climate shift ({dclimate:+.1} °C{iv}) that cut its food"),
@@ -1076,7 +1178,10 @@ impl Simulation {
             }
         };
         let mut summary = format!("{name} {what} mainly because of {because}.");
-        if cause != "intervention" && cause != "reproduction" && cause != "unknown" {
+        if !matches!(
+            cause.as_str(),
+            "intervention" | "reproduction" | "unknown" | "disease"
+        ) {
             summary.push_str(&if persistent {
                 format!(
                     " The hazard from {} stayed at about {:.2} per year as numbers fell.",

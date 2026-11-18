@@ -8,6 +8,8 @@
   --accent: #6fcf8a;
   --accent-ink: #0b2014;
   --warn: #ffd54a;
+  --nature: #ffb460;
+  --disease: #ff6f91;
   --macro: #a9b8ff;
   --danger: #ff7a6b;
   --ocean: #163257;
@@ -32,6 +34,8 @@
     --up: #1e8a45;
     --down: #c4402f;
     --macro: #3f55c4;
+    --nature: #a85a00;
+    --disease: #c2185b;
     color-scheme: light;
   }
 }
@@ -653,6 +657,26 @@ td.down {
   stroke: var(--muted);
   stroke-dasharray: 3 3;
 }
+.chart .marker {
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+  opacity: 0.8;
+}
+.chart .marker-nature {
+  stroke: var(--nature);
+}
+.chart .marker-intervention {
+  stroke: var(--warn);
+}
+.marker-label {
+  flex-basis: 100%;
+}
+.marker-label-nature {
+  color: var(--nature);
+}
+.marker-label-intervention {
+  color: var(--warn);
+}
 .chart-ylabel {
   font-size: 12px;
   color: var(--muted);
@@ -831,6 +855,12 @@ table.why-numbers {
 }
 .ev-intervention {
   border-left-color: var(--warn);
+}
+.ev-nature {
+  border-left-color: var(--nature);
+}
+.ev-disease {
+  border-left-color: var(--disease);
 }
 .meter {
   display: grid;
@@ -1023,6 +1053,78 @@ table.founders td:first-child {
 }
 .error-text {
   color: var(--danger);
+}
+fieldset.nature {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+fieldset.nature legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+fieldset.nature p {
+  margin: 0;
+}
+fieldset.nature .settings {
+  margin-bottom: 0;
+}
+.climate-now {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 6px 0;
+}
+.climate-now div {
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+.climate-now b {
+  display: block;
+  font-size: 15px;
+}
+.pathogen {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+.pathogen label {
+  display: grid;
+  grid-template-columns: 110px 1fr 40px;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.pathogen label.row {
+  display: flex;
+}
+.pathogen p {
+  margin: 2px 0 0;
+}
+table.strains {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 8px;
+}
+table.strains th,
+table.strains td {
+  text-align: right;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--line);
+}
+table.strains th:first-child,
+table.strains td:first-child {
+  text-align: left;
+}
+ul.natural-events {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  font-size: 12.5px;
 }
 .footer {
   margin-top: 14px;

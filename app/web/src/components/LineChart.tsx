@@ -9,8 +9,17 @@ export interface Series {
   band?: number[];
 }
 
+/** A vertical line at an event (PRD FR-E5). */
+export interface Marker {
+  x: number;
+  label: string;
+  kind: "nature" | "intervention";
+}
+
 interface Props {
   series: Series[];
+  /** Events drawn as vertical lines; hovering near one names it. */
+  markers?: Marker[];
   height?: number;
   yLabel?: string;
   xLabel?: string;
@@ -67,8 +76,15 @@ export function xTickLabel(t: number, span: number): string {
   return span >= 10 ? Math.round(t).toLocaleString() : fmt(t, span < 1 ? 2 : 1);
 }
 
+/** The marker closest to `x`, if one lies within `within`. */
+export function nearestMarker(markers: Marker[], x: number, within: number): Marker | null {
+  let best: Marker | null = null;
+  for (const m of markers) if (Math.abs(m.x - x) <= within && (!best || Math.abs(m.x - x) < Math.abs(best.x - x))) best = m;
+  return best;
+}
+
 /** Small dependency-free SVG line chart with axes and a hover read-out. */
-export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log = false, legend = true }: Props) {
+export function LineChart({ series, markers = [], height = 160, yLabel, xLabel = "Year", log = false, legend = true }: Props) {
   const width = 340;
   const pad = { l: 46, r: 10, t: 10, b: 26 };
   const [hover, setHover] = useState<number | null>(null);
@@ -93,6 +109,8 @@ export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log =
     for (const p of s.points) if (Math.abs(p[0] - hover) < Math.abs((best?.[0] ?? Infinity) - hover)) best = p;
     return { name: s.name, color: s.color, p: best };
   }).filter((r) => r.p);
+  const shownMarkers = markers.filter((m) => m.x >= xmin && m.x <= xmax);
+  const near = hover === null ? null : nearestMarker(shownMarkers, hover, (xmax - xmin) * 0.02);
 
   return (
     <div className="chart">
@@ -128,9 +146,19 @@ export function LineChart({ series, height = 160, yLabel, xLabel = "Year", log =
             {s.points.length === 1 && <circle cx={sx(s.points[0][0])} cy={sy(s.points[0][1])} r={3} fill={s.color} />}
           </g>
         ))}
+        {shownMarkers.map((m, i) => (
+          <line key={`m${i}`} x1={sx(m.x)} x2={sx(m.x)} y1={pad.t} y2={height - pad.b} className={`marker marker-${m.kind}`}>
+            <title>{m.label}</title>
+          </line>
+        ))}
         {hover !== null && hover >= xmin && hover <= xmax && <line x1={sx(hover)} x2={sx(hover)} y1={pad.t} y2={height - pad.b} className="cursor" />}
       </svg>
       <div className="chart-foot">
+        {near && (
+          <span className={`marker-label marker-label-${near.kind}`}>
+            {xLabel} {Math.round(near.x).toLocaleString()}: {near.label}
+          </span>
+        )}
         {hoverRows.length > 0 ? (
           hoverRows.map((r) => (
             <span key={r.name}>

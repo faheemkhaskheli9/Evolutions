@@ -67,6 +67,8 @@ pub enum Cause {
     Accident,
     Stillbirth,
     Catastrophe,
+    /// Infection (not counted in `Simulation::deaths`; see `Disease::deaths`).
+    Disease,
 }
 
 impl Cause {
@@ -93,6 +95,7 @@ impl Cause {
             Cause::Accident => "accident",
             Cause::Stillbirth => "non-viable embryo",
             Cause::Catastrophe => "catastrophe",
+            Cause::Disease => "disease",
         }
     }
 }
@@ -150,6 +153,10 @@ pub struct Animal {
     pub mutations: u32,
     pub alive: bool,
     pub cause: Option<Cause>,
+    /// Resistance genotype and infection state. Not in the bincode state: saved in the
+    /// disease section, once a pathogen has been introduced.
+    #[serde(skip)]
+    pub health: crate::disease::Health,
 }
 
 impl Animal {
