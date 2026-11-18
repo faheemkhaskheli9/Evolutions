@@ -7,7 +7,7 @@ import { Autosaver, readAutosave, writeAutosave } from "./autosave";
 import { listTemplates, removeTemplate, storeTemplate } from "./userTemplates";
 import { CheckpointStore, compress, decompress, type CheckpointReason } from "./checkpoints";
 import { BranchSet, sharedSpecies } from "./branches";
-import { exportFiles, type CompareSide, type DesignReport, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type StopCondition, type ToWorker } from "./protocol";
+import { exportFiles, type CompareSide, type DesignReport, type FrameMsg, type FromWorker, type ModeChoice, type SimEvent, type SpeciesInfo, type Status, type StopCondition, type ToWorker } from "./protocol";
 import { smoothSpeed } from "../util";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -24,6 +24,13 @@ let eventsSent = 0;
 let lastSpeciesPost = 0;
 let lastDensityPost = 0;
 let lastForagePost = 0;
+let lastClimatePost = 0;
+/** Whether the world has climate cycles or natural events. */
+let natureOn = false;
+/** Terrain last sent: coastline and biome revisions, and when (climate cycles redraw it). */
+let terrainCoastRev = 0;
+let terrainClimateRev = 0;
+let lastTerrainPost = 0;
 let slowSince = 0;
 let achieved = 0;
 let capExceeded = false;
@@ -287,7 +294,7 @@ function terrain(e: Engine) {
 /** After a world edit, undo or redo: the new terrain, and a full frame. */
 function sendTerrain() {
   if (!engine) return;
-  post({ type: "terrain", ...terrain(engine) });
+  postTerrain(engine);
   precip = engine.layer("precip");
   snowDay = NaN;
   autosaver.dirty = true;
@@ -295,12 +302,34 @@ function sendTerrain() {
 }
 
 /** `fresh`: a new history (a new, opened or replayed world) rather than a rewind or a branch switch. `save`: autosave now (a switch of branch autosaves a little later instead). */
+/** Posts the terrain and notes which coastline and climate it shows. */
+function postTerrain(e: Engine, created = false) {
+  const st = JSON.parse(e.status());
+  terrainCoastRev = st.coast_rev;
+  terrainClimateRev = st.climate_rev;
+  lastTerrainPost = performance.now();
+  const t = terrain(e);
+  natureOn = !!t.world.nature;
+  post({ type: created ? "created" : "terrain", ...t });
+}
+
+/**
+ * Climate cycles and natural events change the coast and biomes as time runs (PRD FR-W7):
+ * the terrain is sent again at once when the coast moved, and at most every 2 s when only
+ * biomes changed.
+ */
+function terrainChanged(status: Status, now: number) {
+  if (status.coast_rev !== terrainCoastRev) return true;
+  return status.climate_rev !== terrainClimateRev && now - lastTerrainPost > 2000;
+}
+
 function sendCreated(fresh = true, save = true) {
   if (!engine) return;
-  post({ type: "created", ...terrain(engine) });
+  postTerrain(engine, true);
   precip = engine.layer("precip");
   snowDay = NaN;
   lastForagePost = 0;
+  lastClimatePost = 0;
   eventsSent = 0;
   lastSpeciesPost = 0;
   achieved = 0;
@@ -331,6 +360,15 @@ function sendFrame(full = false) {
   };
   const transfer: Transferable[] = [];
   const now = performance.now();
+  if (!full && terrainChanged(status, now)) {
+    postTerrain(engine);
+    precip = engine.layer("precip");
+    snowDay = NaN;
+  }
+  if (natureOn && (full || now - lastClimatePost > 1000 || events.length > 0)) {
+    lastClimatePost = now;
+    msg.climate = JSON.parse(engine.climate());
+  }
   if (status.mode === "Individual") {
     msg.positions = engine.positions();
     msg.species = engine.frame_species();

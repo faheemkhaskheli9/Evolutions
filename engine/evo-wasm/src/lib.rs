@@ -217,6 +217,11 @@ impl Engine {
         self.sim.world_info().to_string()
     }
 
+    /// Climate cycles and natural events as JSON (see `Simulation::climate_json`).
+    pub fn climate(&self) -> String {
+        self.sim.climate_json().to_string()
+    }
+
     pub fn species(&self) -> String {
         self.sim.species_json().to_string()
     }

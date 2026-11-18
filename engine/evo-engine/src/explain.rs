@@ -1009,11 +1009,40 @@ impl Simulation {
                 format!("rising {what}")
             }
         };
+        let glacial = self
+            .nature
+            .settings
+            .as_ref()
+            .is_some_and(|n| n.glacial.is_some());
         let iv = if climate_intervention {
             ", your intervention"
+        } else if glacial {
+            ", the glacial cycle"
         } else {
             ""
         };
+        // Natural events that reached the species' range (PRD FR-E3).
+        use crate::nature::NatureKind;
+        let natural = self.natural_events_over(species, t0 - 1.0, year);
+        let describe = |e: &crate::nature::PastEvent| {
+            format!(
+                "{} around {} (year {:.0})",
+                e.kind.label().to_lowercase(),
+                crate::nature::place(&self.world, e.centre as usize),
+                e.year
+            )
+        };
+        let food_event = natural
+            .iter()
+            .find(|e| matches!(e.kind, NatureKind::Drought | NatureKind::Wildfire))
+            .map(|e| describe(e));
+        let cold_event = natural
+            .iter()
+            .find(|e| matches!(e.kind, NatureKind::HarshWinter | NatureKind::Eruption))
+            .map(|e| describe(e));
+        for e in natural.iter().take(4) {
+            points.push(format!("A {} reached its range.", describe(e)));
+        }
         let (cause, because) = if let Some(iv) = intervention {
             ("intervention".to_string(), format!("an intervention: {iv}"))
         } else if persistent && fec_ratio < 0.6 {
@@ -1041,6 +1070,17 @@ impl Simulation {
                     };
                     ("predator".to_string(), who)
                 }
+                0 | 1 if food_event.is_some() => (
+                    "nature".to_string(),
+                    format!(
+                        "a {} that cut its food and water",
+                        food_event.clone().unwrap_or_default()
+                    ),
+                ),
+                4 if cold_event.is_some() => (
+                    "nature".to_string(),
+                    format!("cold from a {}", cold_event.clone().unwrap_or_default()),
+                ),
                 0 if dclimate.abs() >= 0.5 => (
                     "climate".to_string(),
                     format!("a climate shift ({dclimate:+.1} °C{iv}) that cut its food"),

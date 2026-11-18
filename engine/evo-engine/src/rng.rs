@@ -23,6 +23,7 @@ pub mod stream {
     pub const EVENTS: u64 = 13;
     pub const SPECIES: u64 = 14;
     pub const MOVEMENT: u64 = 15;
+    pub const NATURE: u64 = 16;
 }
 
 #[inline]

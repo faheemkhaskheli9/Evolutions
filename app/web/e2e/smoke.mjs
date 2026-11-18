@@ -444,6 +444,44 @@ try {
     // The world, saved and opened again, still knows the design.
     await page.getByRole("tab", { name: "World" }).click();
   });
+  await step("climate cycles and natural events: the sea falls, events are logged and charted", async () => {
+    await page.getByRole("button", { name: "New world" }).click();
+    await page.getByRole("button", { name: /^Archipelago/ }).click();
+    await page.getByLabel("Glacial cycles (ice ages and sea level)").check();
+    // 10^3.25 ≈ 1,778, rounded to a 2,000-year cycle.
+    await page.getByLabel("Cycle length").fill("3.25");
+    await page.getByText("Cycle length 2,000 years").waitFor();
+    await page.getByLabel("Droughts").check();
+    await page.getByLabel("Volcanic eruptions").check();
+    await page.getByRole("button", { name: "Create world" }).click();
+    await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
+    await page.getByRole("tab", { name: "World" }).click();
+    await page.getByRole("region", { name: "Climate" }).waitFor({ timeout: 10000 });
+    const target = (await page.evaluate(() => window.__evoHash())).year + 1000;
+    await page.getByRole("button", { name: "+1k yr" }).click();
+    for (let t = 0; (await page.evaluate(() => window.__evoHash())).year < target; t++) {
+      if (t > 900) throw new Error("jump did not finish");
+      await page.waitForTimeout(200);
+    }
+    await page.getByText("Fast-forwarding…").waitFor({ state: "detached", timeout: 30000 });
+    // Half a cycle in: about 73 m lower and 3.6 °C colder.
+    const climate = page.getByRole("region", { name: "Climate" });
+    await climate.getByText(/^−(6\d|7\d) m$/).waitFor({ timeout: 10000 });
+    await climate.getByText("Sea level (m)").waitFor();
+    if ((await climate.locator(".marker").count()) === 0) throw new Error("no event markers on the climate charts");
+    await page.getByRole("tab", { name: /Chronicle/ }).click();
+    await page.getByRole("button", { name: "Climate & nature" }).click();
+    await page.getByText(/^Drought around|^Volcanic eruption at/).first().waitFor({ timeout: 10000 });
+    // The settings travel in a template (format 4).
+    await page.getByRole("tab", { name: "World" }).click();
+    await page.getByRole("button", { name: "Save as template…" }).click();
+    await page.getByLabel("Template name").fill("Ice ages");
+    const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Save template" }).click()]);
+    const file = join(tmpdir(), `evo-template-nature-${process.pid}.evotemplate`);
+    await d.saveAs(file);
+    const t = JSON.parse(readFileSync(file, "utf8"));
+    if (t.version !== 4 || t.nature?.glacial?.period_years !== 2000 || !t.nature.droughts || t.nature.fires) throw new Error(`template lacks the climate settings: ${JSON.stringify(t.nature)}`);
+  });
   const fatal = errors.filter((e) => !/favicon/.test(e));
   if (fatal.length) throw new Error(`page errors:\n${fatal.join("\n")}`);
   console.log("\nSmoke test passed.");

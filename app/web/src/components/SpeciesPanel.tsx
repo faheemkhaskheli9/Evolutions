@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import type { AlleleInfo, Catalog, SpeciesDetail, SpeciesInfo, Why } from "../engine/protocol";
+import type { AlleleInfo, Catalog, SimEvent, SpeciesDetail, SpeciesInfo, Why } from "../engine/protocol";
+import { chartMarkers } from "./chartMarkers";
 import { fmt, formatYears, rgb } from "../util";
 import { LineChart } from "./LineChart";
 import { ALLELE_COLORS, alleleSeries, heterozygositySeries, MAX_ALLELES, neSeries } from "./popgenCharts";
@@ -24,12 +25,15 @@ interface Props {
   /** Explanation of the charted trait's change since the species arose: undefined until asked, then null while working. */
   traitWhy: Why | null | undefined;
   onExplainTrait: (key: string) => void;
+  /** The Chronicle: interventions and natural events are marked on the charts (PRD FR-E5). */
+  events?: SimEvent[];
 }
 
 const KEY_TRAITS = ["body_mass", "insulation", "appendage", "coat", "diet", "brain", "litter", "pace", "heat_tolerance", "kidney", "ornament", "leg_length"];
 
-export function SpeciesPanel({ species, year, catalog, selected, onSelect, detail, alleles, trackUids, setTrackUids, trait, setTrait, traitWhy, onExplainTrait }: Props) {
+export function SpeciesPanel({ species, year, catalog, selected, onSelect, detail, alleles, trackUids, setTrackUids, trait, setTrait, traitWhy, onExplainTrait, events = [] }: Props) {
   const [showExtinct, setShowExtinct] = useState(true);
+  const markers = useMemo(() => chartMarkers(events), [events]);
   const sorted = useMemo(
     () =>
       species
@@ -79,6 +83,7 @@ export function SpeciesPanel({ species, year, catalog, selected, onSelect, detai
               <LineChart
                 yLabel="Population"
                 series={[{ name: "Individuals", color: rgb(sel.color), points: detail.metrics.map((m) => [m.year, m.n]) }]}
+                markers={markers}
                 log
               />
               <div className="row">
@@ -101,6 +106,7 @@ export function SpeciesPanel({ species, year, catalog, selected, onSelect, detai
                       band: detail.metrics.filter((m) => m.n > 0).map((m) => m.sd[traitIndex]),
                     },
                   ]}
+                  markers={markers}
                 />
               )}
               {traitIndex >= 0 && (

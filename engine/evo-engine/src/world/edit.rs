@@ -216,6 +216,69 @@ impl World {
         }
     }
 
+    /// Raises (positive) or lowers (negative) the sea by `rise_m` metres (PRD FR-W7).
+    /// Elevations are heights above sea level, so every tile moves by −`rise_m`, and the
+    /// coastline, climate, rivers and biomes are recomputed as after a brush stroke.
+    /// Painted and event climate offsets, and seasonal-amplitude offsets, are kept.
+    /// Returns the tiles that were dry and are now sea or lake.
+    pub fn change_sea_level(&mut self, rise_m: f32) -> Vec<usize> {
+        let n = self.w * self.h;
+        let wet_before: Vec<bool> = (0..n).map(|i| self.is_wet(i)).collect();
+        let amp = self.temp_amp.clone();
+        let (d_temp, d_precip) = self.climate_offsets();
+        let d_amp: Vec<f32> = amp.iter().zip(&self.temp_amp).map(|(a, b)| a - b).collect();
+        for e in self.elevation.iter_mut() {
+            *e -= rise_m;
+        }
+        self.recompute_after_edit(&d_temp, &d_precip);
+        if d_amp.iter().any(|&d| d != 0.0) {
+            for i in 0..n {
+                self.temp_amp[i] += d_amp[i];
+            }
+            self.refresh_biomes();
+        }
+        for i in 0..n {
+            if wet_before[i] && !self.is_wet(i) {
+                self.forage[i] = self.forage_max[i] * 0.8;
+                self.roughage[i] = self.roughage_max[i] * 0.8;
+            }
+            if self.is_wet(i) {
+                self.carcass[i] = 0.0;
+            }
+        }
+        self.vegetation_changed();
+        (0..n)
+            .filter(|&i| !wet_before[i] && self.is_wet(i))
+            .collect()
+    }
+
+    /// Gives the sea floor continental shelves: the shallowest `share` of sea tiles (by
+    /// depth, so mostly those along coasts) are made 20–130 m deep in the same order,
+    /// and the rest at least 131 m. Generated sea floors drop to 50 m and then steeply,
+    /// so without shelves a falling sea (PRD FR-W7) would expose almost no land. Land
+    /// and the coastline are unchanged, so nothing else needs recomputing.
+    pub fn add_shelves(&mut self, share: f64) {
+        let mut sea: Vec<usize> = (0..self.w * self.h)
+            .filter(|&i| self.water[i] == Water::Ocean)
+            .collect();
+        if sea.is_empty() {
+            return;
+        }
+        sea.sort_by(|&a, &b| {
+            self.elevation[b]
+                .total_cmp(&self.elevation[a])
+                .then(a.cmp(&b))
+        });
+        let shelf = ((sea.len() as f64 * share) as usize).max(1);
+        for (r, &i) in sea.iter().enumerate() {
+            self.elevation[i] = if r < shelf {
+                -(20.0 + 110.0 * r as f32 / shelf as f32)
+            } else {
+                self.elevation[i].min(-131.0)
+            };
+        }
+    }
+
     /// Sea or lake: no animal can stand there.
     fn is_wet(&self, i: usize) -> bool {
         matches!(self.water[i], Water::Ocean | Water::Lake)

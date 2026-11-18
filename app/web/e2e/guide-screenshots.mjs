@@ -286,6 +286,24 @@ try {
   await page.reload();
   await page.getByText("Continue where you left off?").waitFor({ timeout: 20000 });
   await shot("23-resume", page.locator(".modal"));
+
+  console.log("13. Climate cycles and natural events");
+  await page.getByRole("button", { name: /^Archipelago/ }).click();
+  await page.getByLabel("Seed").fill("2024");
+  await page.getByLabel("Glacial cycles (ice ages and sea level)").check();
+  await page.getByLabel("Cycle length").fill("3.25");
+  for (const l of ["Droughts", "Wildfires", "Harsh winters", "Volcanic eruptions"]) await page.getByLabel(l).check();
+  await page.locator("fieldset.nature").scrollIntoViewIfNeeded();
+  await shot("32-nature-settings", page.locator("fieldset.nature"));
+  await page.getByRole("button", { name: "Create world" }).click();
+  await page.getByRole("heading", { name: "Create a world" }).waitFor({ state: "detached", timeout: 30000 });
+  await jump("+1k yr");
+  await noToasts();
+  await page.getByRole("tab", { name: "World" }).click();
+  const climate = page.getByRole("region", { name: "Climate" });
+  await climate.getByText("Sea level (m)").waitFor({ timeout: 10000 });
+  await page.waitForTimeout(1200);
+  await shot("33-climate", climate);
   console.log("Done.");
 } catch (e) {
   console.error("FAILED:", e.message);

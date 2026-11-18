@@ -50,6 +50,8 @@ pub enum EventKind {
     Intervention,
     Crash,
     Adaptation,
+    /// Climate cycles and natural events (PRD FR-W7, FR-E3).
+    Nature,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

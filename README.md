@@ -57,6 +57,7 @@ npm run dev           # open the printed URL
 In the app:
 - Pick a template (or **Random world**), adjust the founder species, and press **Create world**. Tick **Customise world settings** to change size, land, climate and seasons. **Save as template…** keeps your settings to reuse or share as a `.evotemplate` file.
 - **✎ Design a species…** (Create dialog, or **Design…** in the World tab) builds your own founder species from trait sliders, with a 3D preview and live checks that use the simulation's physiology: designs that cannot balance their energy budget, breed or keep warm are refused with the reason, and risky ones are warned. Designed species travel in saves, replays and templates.
+- **Climate and natural events** (Create dialog, each optional): glacial cycles that cool the world and lower the sea, so land bridges open and close, and random droughts, wildfires, harsh winters and volcanic eruptions drawn from the world's seed. They are logged in the Chronicle, marked on the charts, and shown in the World tab's **Climate** section.
 - **✎ Edit world** (World tab) paints mountains, seas, straits, land bridges, lakes, rainfall and temperature onto the world, with undo; rivers, climate and biomes follow the new terrain.
 - Press **Space** or ▶ to run time.
 - Click an animal to inspect it. Scroll to zoom, drag to pan, right-drag (or Ctrl-drag) to orbit the 3D world. The **3D world / Flat map** switch changes to a top-down map.
@@ -81,7 +82,7 @@ cargo run --release -p evo-cli -- run --template ice_age --seed 7 --years 2000 \
 cargo run --release -p evo-cli -- info out/run.evo
 ```
 
-`--template-file lesson.evotemplate` creates the world from a user template (as saved or exported by the app; `--seed` replaces its seed), and `--save-template out.evotemplate` writes one for the run's world. `--mode macro` runs in Macro mode (1,000-year steps; Population mode finishes the last part of a step); `--mode auto` (the default) uses it for runs of 20,000 years or more. `--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
+`--template-file lesson.evotemplate` creates the world from a user template (as saved or exported by the app; `--seed` replaces its seed), and `--save-template out.evotemplate` writes one for the run's world. `--mode macro` runs in Macro mode (1,000-year steps; Population mode finishes the last part of a step); `--mode auto` (the default) uses it for runs of 20,000 years or more. `--nature all` (or a list of `glacial`, `droughts`, `fires`, `winters`, `eruptions`; with `--glacial-period <years>`) turns on climate cycles and natural events for a new world. `--why` writes the "Why?" explanation of each Chronicle event as JSON. `--debug` prints each species' yearly vital rates (starvation, predation, heat and cold hazards; food ratio; fecundity).
 
 ## What is simulated
 
@@ -117,6 +118,7 @@ cargo run --release -p evo-cli -- info out/run.evo
 | User templates | A world made from an exported template has the same state hash as the world it came from, for built-in, random and customised worlds; tampered files are rejected |
 | Branch timelines | Branches given the same actions stay identical; a branch with one extra intervention matches the other up to it, sample for sample and event for event, and differs afterwards |
 | Species designer | A design with an impossible energy budget is refused with the reason, in the designer, new worlds and interventions; a design made of a library species' values gives the same world as that species; designs survive saves, replays and templates; every library species passes the checks |
+| Climate cycles and natural events | Falling seas join two islands across a shallow strait (land connectivity > 0) and rising seas split them again; droughts cut and then give back rainfall in their region; every kind of event happens and the climate returns to its start when they end; a run with events replays and reloads to the same state hash; with nature off, outputs are byte-identical to the previous engine |
 | World editor | A one-patch-wide painted strait cuts land connectivity and rivers re-route; undo restores the exact previous hash; a replay with edits ends in the same state; a template keeps edits painted at year 0 |
 | "Why?": drift or selection | For traits nothing selects on, change ÷ expected drift SD has mean square ≈ 1 over 120 tests; in a small Blank Slate population those changes are reported as drift; in Ice Age, hares' insulation rise is reported as selection by cold stress |
 

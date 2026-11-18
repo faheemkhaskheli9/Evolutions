@@ -163,6 +163,7 @@ mod tests {
             label: None,
             edits: vec![],
             designs: vec![],
+            nature: None,
         })
         .unwrap()
     }

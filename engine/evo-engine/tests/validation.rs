@@ -325,6 +325,7 @@ fn blank(seed: u64) -> Simulation {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap()
 }
@@ -561,6 +562,7 @@ fn gradient_world(seed: u64, founders: Vec<FounderGroup>) -> Simulation {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap()
 }
@@ -636,6 +638,7 @@ fn v_s1_allopatric_speciation() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     // Raise the sea in a vertical band to split the world in two.
@@ -801,6 +804,7 @@ fn custom_world_settings_apply_and_are_validated() {
             label: None,
             edits: vec![],
             designs: vec![],
+            nature: None,
         })
     };
     let gen = WorldGenParams {
@@ -893,6 +897,7 @@ fn bad_world_settings_are_rejected() {
             label: None,
             edits: vec![],
             designs: vec![],
+            nature: None,
         })
     };
     assert!(make(&|g| {
@@ -941,6 +946,7 @@ fn river_and_lake_layers_are_consistent() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     let water = s.layer("water");
@@ -1169,6 +1175,7 @@ fn fst_world(strait: bool) -> Simulation {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     if strait {
@@ -1231,6 +1238,7 @@ fn why_insulation_rises_from_cold_in_the_ice_age() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     s.set_mode(Mode::Population).unwrap();
@@ -1262,6 +1270,7 @@ fn why_insulation_event_names_cold_stress() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     s.run_years(1.0);
@@ -1301,6 +1310,7 @@ fn why_neutral_trait_change_is_drift_in_a_small_population() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     s.params.habitat_m2_per_tile = 100.0;
@@ -1359,6 +1369,7 @@ fn drift_test_is_calibrated_on_neutral_traits() {
             label: None,
             edits: vec![],
             designs: vec![],
+            nature: None,
         })
         .unwrap();
         s.params.habitat_m2_per_tile = 100.0;
@@ -1652,6 +1663,7 @@ fn fst_world_split(seed: u64) -> Simulation {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     let w = s.world.w;
@@ -1696,6 +1708,7 @@ fn macro_mode_runs_a_million_years_on_earth_in_ten_minutes() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     })
     .unwrap();
     s.set_mode(Mode::Population).unwrap();
@@ -1749,6 +1762,7 @@ fn user_template_recreates_the_world() {
         label: None,
         edits: vec![],
         designs: vec![],
+        nature: None,
     };
     let worlds = [
         ("island_dwarfism", None),
@@ -1765,6 +1779,7 @@ fn user_template_recreates_the_world() {
             label: None,
             edits: vec![],
             designs: vec![],
+            nature: None,
         });
         let original = Simulation::new(cfg).unwrap();
         let file = original
@@ -1780,4 +1795,147 @@ fn user_template_recreates_the_world() {
         assert_eq!(back.display_name(), "Lesson 3");
         assert_eq!(back.state_hash(), original.state_hash());
     }
+}
+
+/// A world with climate cycles and natural events (PRD FR-W7, FR-E3).
+fn natural_world(seed: u64, nature: Option<evo_engine::NatureSettings>) -> Simulation {
+    Simulation::new(NewWorld {
+        template: "archipelago".into(),
+        seed,
+        gen: Some(WorldGenParams {
+            width: 64,
+            height: 32,
+            shape: LandShape::Archipelago,
+            land_fraction: 0.35,
+            ..Default::default()
+        }),
+        founders: None,
+        realism: None,
+        label: None,
+        edits: vec![],
+        designs: vec![],
+        nature,
+    })
+    .unwrap()
+}
+
+fn all_nature(period: f64) -> evo_engine::NatureSettings {
+    let mut n = evo_engine::NatureSettings::all();
+    n.glacial.as_mut().unwrap().period_years = period;
+    n
+}
+
+#[test]
+fn natural_events_are_deterministic_and_replay_identically() {
+    let run = |sim: &mut Simulation| {
+        sim.run_steps(24 * 400);
+        sim.set_mode(Mode::Population).unwrap();
+        sim.run_years(150.0);
+        sim.apply(evo_engine::Intervention::ClimateShift { delta_c: -2.0 })
+            .unwrap();
+        sim.run_years(150.0);
+    };
+    let mut a = natural_world(17, Some(all_nature(1000.0)));
+    run(&mut a);
+    let mut b = natural_world(17, Some(all_nature(1000.0)));
+    run(&mut b);
+    assert_eq!(a.state_hash(), b.state_hash());
+    let natural = a
+        .events
+        .iter()
+        .filter(|e| e.kind == evo_engine::record::EventKind::Nature)
+        .count();
+    assert!(natural >= 20, "{natural} natural events");
+    assert!(a.nature.sea_applied < -25.0, "sea {}", a.nature.sea_applied);
+    // The same seed without nature differs; another seed draws other events.
+    assert_ne!(natural_world(17, None).state_hash(), {
+        let mut c = natural_world(17, None);
+        run(&mut c);
+        c.state_hash()
+    });
+    let mut d = natural_world(18, Some(all_nature(1000.0)));
+    run(&mut d);
+    assert_ne!(
+        d.nature.history.iter().map(|h| h.year).collect::<Vec<_>>(),
+        a.nature.history.iter().map(|h| h.year).collect::<Vec<_>>()
+    );
+
+    // The replay log reproduces the run.
+    let script = a.replay_script().unwrap();
+    let r = evo_engine::Replay::run(script).unwrap();
+    assert!(r.matches());
+
+    // Saved part-way, loaded and continued: the same as running straight through.
+    let mut half = natural_world(17, Some(all_nature(1000.0)));
+    half.run_steps(24 * 400);
+    half.set_mode(Mode::Population).unwrap();
+    half.run_years(75.0);
+    let mut loaded = Simulation::load_bytes(&half.save_bytes().unwrap()).unwrap();
+    assert_eq!(loaded.nature, half.nature);
+    loaded.run_years(75.0);
+    loaded
+        .apply(evo_engine::Intervention::ClimateShift { delta_c: -2.0 })
+        .unwrap();
+    loaded.run_years(150.0);
+    assert_eq!(loaded.state_hash(), a.state_hash());
+}
+
+#[test]
+fn with_nature_off_worlds_are_unchanged() {
+    // "Nothing on" is the same as no setting at all: same state, same hash, same save.
+    let mut a = natural_world(5, None);
+    let mut b = natural_world(5, Some(evo_engine::NatureSettings::default()));
+    assert!(!b.nature.on());
+    for s in [&mut a, &mut b] {
+        s.run_steps(24 * 30);
+        s.set_mode(Mode::Population).unwrap();
+        s.run_years(50.0);
+    }
+    assert_eq!(a.state_hash(), b.state_hash());
+    assert!(a.nature.series.is_empty());
+    assert!(!a
+        .events
+        .iter()
+        .any(|e| e.kind == evo_engine::record::EventKind::Nature));
+    // A version 6 save (no nature section) loads with nature off.
+    let bytes = a.save_bytes().unwrap();
+    let tail = bincode::serialize(&a.nature).unwrap().len();
+    let mut v6 = bytes[..bytes.len() - tail].to_vec();
+    v6[4..8].copy_from_slice(&6u32.to_le_bytes());
+    let old = Simulation::load_bytes(&v6).unwrap();
+    assert_eq!(old.state_hash(), a.state_hash());
+    assert!(!old.nature.on());
+}
+
+#[test]
+fn templates_keep_climate_cycles_and_natural_events() {
+    use evo_engine::UserTemplate;
+    let original = natural_world(23, Some(all_nature(50_000.0)));
+    let t = original.user_template("Ice ages", "").unwrap();
+    assert_eq!(t.version, 4);
+    let t = UserTemplate::parse(&t.to_json()).unwrap();
+    let copy = Simulation::new(t.new_world()).unwrap();
+    assert_eq!(copy.state_hash(), original.state_hash());
+    assert_eq!(copy.nature.settings, original.nature.settings);
+    // Without nature the format stays at version 1.
+    let plain = natural_world(23, None).user_template("Plain", "").unwrap();
+    assert_eq!(plain.version, 1);
+    // An older format cannot hold it, and bad settings are refused.
+    let mut v3 = t.clone();
+    v3.version = 3;
+    assert!(UserTemplate::parse(&v3.to_json()).is_err());
+    let mut bad = t.clone();
+    bad.nature
+        .as_mut()
+        .unwrap()
+        .glacial
+        .as_mut()
+        .unwrap()
+        .sea_drop_m = -5.0;
+    assert!(UserTemplate::parse(&bad.to_json()).is_err());
+    assert!(Simulation::new(NewWorld {
+        nature: bad.nature.clone(),
+        ..t.new_world()
+    })
+    .is_err());
 }

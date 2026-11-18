@@ -55,6 +55,41 @@ impl Simulation {
             "seed": self.seed,
             "patch_size": self.params.patch_size,
             "designs": self.designs,
+            "nature": self.nature.settings,
+        })
+    }
+
+    /// Climate cycles and natural events (PRD FR-W7, FR-E3): the settings, the current
+    /// cycle offsets, the chart series, events under way and recent events (with the
+    /// place they hit), as JSON.
+    pub fn climate_json(&self) -> Value {
+        let n = &self.nature;
+        let w = &self.world;
+        let ev = |kind: crate::nature::NatureKind,
+                  year: f64,
+                  until: f64,
+                  centre: u32,
+                  radius: f32| {
+            json!({
+                "kind": kind.label(), "year": year, "until": until,
+                "place": crate::nature::place(w, centre as usize),
+                "x": (centre as usize % w.w) as f64 + 0.5, "y": (centre as usize / w.w) as f64 + 0.5,
+                "radius": radius,
+            })
+        };
+        json!({
+            "settings": n.settings,
+            "temp_offset": w.global_offset,
+            "cycle_temp": n.temp_applied,
+            "sea_level": n.sea_applied,
+            "landmasses": n.landmasses,
+            "coast_rev": n.coast_rev,
+            "series": n.series.iter().map(|s| [s.year, s.temp as f64, s.sea as f64, s.events as f64]).collect::<Vec<_>>(),
+            "active": n.active.iter().map(|e| {
+                let r = n.history.iter().rev().find(|h| h.year == e.start && h.kind == e.kind).map_or(0.0, |h| h.radius);
+                ev(e.kind, e.start, e.until, e.centre, r)
+            }).collect::<Vec<_>>(),
+            "history": n.history.iter().rev().take(200).map(|h| ev(h.kind, h.year, h.until, h.centre, h.radius)).collect::<Vec<_>>(),
         })
     }
 
@@ -81,6 +116,10 @@ impl Simulation {
             "realism": format!("{:?}", self.params.realism),
             "mutation_rate": self.params.effective_mutation_rate(),
             "global_temp_offset": self.world.global_offset,
+            "sea_level": self.nature.sea_applied,
+            "coast_rev": self.nature.coast_rev,
+            // Changes whenever biomes are recomputed (climate, coastline or an edit).
+            "climate_rev": self.world.revision,
             "individual_cap": self.params.individual_cap,
             "events": self.events.len(),
         })

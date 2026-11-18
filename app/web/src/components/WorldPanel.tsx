@@ -1,12 +1,17 @@
 import { NumberInput } from "./NumberInput";
 import { useState } from "react";
-import type { AlleleInfo, Brush, Catalog, ExportKind, ModeChoice, SpeciesDesign, SpeciesInfo, Status } from "../engine/protocol";
+import type { AlleleInfo, Brush, Catalog, Climate, ExportKind, ModeChoice, SimEvent, SpeciesDesign, SpeciesInfo, Status } from "../engine/protocol";
+import { ClimatePanel } from "./ClimatePanel";
 import { BRUSHES } from "./brush";
 import { ALLELE_RAMP } from "../util";
 import { TemplateForm } from "./TemplateForm";
 import type { Layer, Tool } from "./MapView";
 
 interface Props {
+  /** Climate cycles and natural events, when the world has them (PRD FR-W7, FR-E3). */
+  climate: Climate | null;
+  /** The Chronicle, for chart markers. */
+  events: SimEvent[];
   catalog: Catalog;
   status: Status | null;
   species: SpeciesInfo[];
@@ -218,6 +223,8 @@ export function WorldPanel(p: Props) {
           </label>
         </div>
       )}
+
+      {p.climate && <ClimatePanel climate={p.climate} events={p.events} />}
 
       <h3>Change the world</h3>
       <p className="muted small">Interventions change conditions, never genes. Evolution does the rest.</p>

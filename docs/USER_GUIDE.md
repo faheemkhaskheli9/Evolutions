@@ -116,6 +116,22 @@ Tick **Customise world settings** to change the world generator:
 | **Axial tilt** | Seasonality. 0° means no seasons; Earth's tilt is 23.4°. |
 | **North edge / South edge** | The latitudes the map spans. This sets how much climate varies from top to bottom. |
 
+### Climate and natural events
+
+Under **Climate and natural events** you can let the climate change on its own. Everything is off by default, and each part can be turned on separately:
+
+![Climate and natural events in the Create dialog: glacial cycles with cycle length, cooling and sea-level fall, and droughts, wildfires, harsh winters and volcanic eruptions](guide/32-nature-settings.png)
+
+| Setting | What happens |
+|---|---|
+| **Glacial cycles** | The world cools slowly into an ice age, then warms quickly back (the pattern of the last million years). At the glacial maximum it is **Cooling** °C colder (default 6 °C) and the sea is **Sea-level fall** metres lower (default 120 m). As the sea falls, shallow seas become land: islands join and land bridges open between continents; as it rises they close again. A world with glacial cycles is given shallow continental shelves along its coasts (as Earth has), so there is land for a falling sea to expose. **Cycle length** is 100,000 years on Earth; a short cycle (a few thousand years) shows it within a lesson. |
+| **Droughts** | A region gets 40–70% less rain for 2–6 years. Plants grow less there. |
+| **Wildfires** | A region's plants burn. They grow back over the following years. |
+| **Harsh winters** | A region's winter is several degrees colder for one year. |
+| **Volcanic eruptions** | A wide region cools by up to 3.5 °C for two years, and life near the volcano is killed. |
+
+Events happen at random, but the randomness comes from the world's seed: the same seed gives the same droughts in the same years, so a replay or a template repeats them exactly. Droughts, fires, harsh winters and eruptions are short, so they happen in Individual and Population mode; Macro mode's 1,000-year steps skip them, while glacial cycles go on.
+
 Click **Create world** to generate the terrain, climate, rivers and biomes and release the founders.
 
 ### Your templates
@@ -129,6 +145,7 @@ A template keeps a world's starting point: the world settings, seed, mutation ra
 - Saved templates are listed under **Your templates**. Click one to fill in its settings; you can still change the seed or founders before creating the world. A world made from it is the same world, animal for animal, as the one the template was saved from, as long as you keep its seed.
 - Edits painted with the world editor at year 0, before time first runs, are part of the template (see [Edit the world](#edit-the-world)); later edits are not.
 - Designed species the founders use are part of the template (see [Design a species](#design-a-species)).
+- So are the climate cycles and natural events (see [Climate and natural events](#climate-and-natural-events)).
 - **⤓ Export** downloads the template as a small `.evotemplate` file to send to others. **Import template…** adds a file someone sent you. **✕** removes a template from this browser.
 
 Templates are kept in this browser, like the autosave, so export the ones you want to keep. A file that is damaged, edited to impossible values (such as a count of 0 or a latitude beyond 90°), or made by a newer version of the app is refused with a message saying why. The format is described in the TRD (TR-DA5). The command-line runner reads the same files: `evo run --template-file lesson.evotemplate`.
@@ -345,8 +362,9 @@ It records:
 - **Adaptations:** a trait shifted by 3, 6, 9 … standard deviations since the species arose, for example *"litter size increased by 70%"*.
 - **New species**, **extinctions** and **population crashes**.
 - **World events:** founders released, mode switches, interventions, and climate recovering after an impact winter.
+- **Climate and natural events** (if the world has them): droughts, wildfires, harsh winters and eruptions with where they struck, land bridges opening and flooding as the sea falls and rises, and each glacial maximum and interglacial.
 
-Use the filter chips (**All**, **New species**, **Extinctions**, **Adaptations**, **World**) to focus on one kind of event.
+Use the filter chips (**All**, **New species**, **Extinctions**, **Adaptations**, **Climate & nature**, **World**) to focus on one kind of event.
 
 The **⟲** button at the end of an entry goes back to just before that event (see [Rewind](#rewind)).
 
@@ -358,7 +376,7 @@ Adaptations, population crashes, extinctions and new species have a **Why?** lin
 
 - **Trait changes** get a verdict: **Selection**, **Consistent with drift**, or **Selection and drift**. Random genetic drift moves a trait's average by about √(V_A·t/Nₑ) over t generations (V_A is the trait's additive genetic variance, Nₑ the effective population size). The panel compares the actual change with that: more than 3 times as large is selection, less than 2 times is consistent with drift, and in between is mixed. Large populations drift very little, so a steady change in a big population is almost always selection; in a small one, even a large change can be chance.
 - It then names the **hazard the trait affects most** and which way it pushes: for example *"The main pressure is cold stress: animals with higher insulation suffer less cold stress"*, and what holds the change back (*"animals with higher insulation need more food"*). These come from splitting the trait's selection gradient (β) into starvation, dehydration, predation, heat stress, cold stress, ageing and reproduction. Cold and heat include the stress newborns face in their birth month.
-- **Crashes and extinctions** name the hazard that grew most between the population's peak and the crash (or, if none rose, the one that stayed high), and the matching cause: a food shortage (often a population that outgrew its food), a new predator or more predators, a climate shift, or one of your interventions (a plague or a meteor).
+- **Crashes and extinctions** name the hazard that grew most between the population's peak and the crash (or, if none rose, the one that stayed high), and the matching cause: a food shortage (often a population that outgrew its food), a new predator or more predators, a climate shift (from you or from the glacial cycle), a drought, wildfire, harsh winter or eruption that reached the species' range, or one of your interventions (a plague or a meteor).
 - **New species** say whether the split was allopatric (and what separated the ranges: open water, mountains or a gap in the range) or parapatric, and which of the three isolation factors contributed most: hybrid incompatibilities, mate choice, or breeding at different times of year.
 
 **The numbers** opens the values behind the answer, and the link at the bottom opens the chart that shows it (the trait's chart, the population chart, or the tree).
@@ -438,9 +456,19 @@ Interventions change **conditions only, never genes**. Evolution does the rest. 
 | **Introduce species** | Pick a species and a count, then **Place** (and click the map) or **Best habitat**. **Design…** makes a new species, checked against this world (see [Design a species](#design-a-species)). | Releases new founders. Good for invasive-species or predator-reintroduction experiments. If there is no suitable habitat where you click (open ocean, for example), the app says so and nothing is added. |
 | **Epidemic** | Pick a species and a mortality %, then **Strike**. | Kills that share of the species, creating a bottleneck. Watch genetic diversity drop. |
 
+Interventions and natural events are also marked on the charts: a dashed line at the year (yellow for your interventions, orange for natural events) on the species population and trait charts and the climate charts. Point at one to read what happened.
+
 ![After a meteor strike: a dark gap in the population density map where the impact killed everything](guide/21-meteor.png)
 
 ![The Chronicle logging the meteor impact and the organisms it killed](guide/22-meteor-chronicle.png)
+
+### Climate
+
+In a world with climate cycles or natural events, the **World** tab has a **Climate** section: the global temperature offset now (glacial cooling plus your climate shifts and any impact winter), the sea level relative to the start, the number of large landmasses, and the events under way. Charts show temperature and sea level over time, with events marked.
+
+![The Climate section: temperature offset, sea level, large landmasses and events under way, with temperature and sea-level charts marked by events](guide/33-climate.png)
+
+The map and the 3D world follow the climate: coastlines move as the sea falls and rises, and biomes shift as the world cools and warms.
 
 ### Edit the world
 

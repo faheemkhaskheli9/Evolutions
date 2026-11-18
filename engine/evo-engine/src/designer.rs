@@ -840,6 +840,7 @@ mod tests {
             label: None,
             edits: vec![],
             designs,
+            nature: None,
         })
     }
 

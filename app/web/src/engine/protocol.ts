@@ -44,6 +44,57 @@ export interface NewWorldConfig {
   edits?: Stroke[];
   /** Designed species the founders use (PRD FR-S2). */
   designs?: SpeciesDesign[];
+  /** Climate cycles and natural events (PRD FR-W7, FR-E3); absent turns them all off. */
+  nature?: NatureSettings | null;
+}
+
+/** A glacial/interglacial cycle; mirrors the engine's `GlacialCycle`. */
+export interface GlacialCycle {
+  period_years: number;
+  /** Global cooling at the glacial maximum, °C. */
+  cooling_c: number;
+  /** Sea-level fall at the glacial maximum, m. */
+  sea_drop_m: number;
+}
+
+/** Which climate cycles and natural events a world has; mirrors the engine's `NatureSettings`. */
+export interface NatureSettings {
+  glacial?: GlacialCycle | null;
+  droughts: boolean;
+  fires: boolean;
+  harsh_winters: boolean;
+  eruptions: boolean;
+}
+
+export const DEFAULT_GLACIAL: GlacialCycle = { period_years: 100_000, cooling_c: 6, sea_drop_m: 120 };
+
+/** A natural event, under way or past. `x`, `y`: its centre in tiles; `radius` in tiles. */
+export interface NaturalEvent {
+  kind: "Drought" | "Wildfire" | "Harsh winter" | "Volcanic eruption";
+  year: number;
+  until: number;
+  place: string;
+  x: number;
+  y: number;
+  radius: number;
+}
+
+/** The world's climate (PRD FR-W7, FR-E3), from the engine's `climate_json`. */
+export interface Climate {
+  settings: NatureSettings | null;
+  /** Global temperature offset now (cycle, interventions, impact winters), °C. */
+  temp_offset: number;
+  /** The glacial cycle's part of it, °C. */
+  cycle_temp: number;
+  /** Sea level relative to the start, m. */
+  sea_level: number;
+  landmasses: number;
+  coast_rev: number;
+  /** [year, temperature offset °C, sea level m, events under way]. */
+  series: [number, number, number, number][];
+  active: NaturalEvent[];
+  /** Recent natural events, newest first. */
+  history: NaturalEvent[];
 }
 
 /** A designed founder species (PRD FR-S2); mirrors the engine's `SpeciesDesign`. */
@@ -130,6 +181,8 @@ export interface UserTemplate {
   edits?: Stroke[];
   /** Designed species the founders use (format 3). */
   designs?: SpeciesDesign[];
+  /** Climate cycles and natural events (format 4). */
+  nature?: NatureSettings | null;
 }
 
 /** A user template kept in the browser. `text` is the file, as the engine wrote it. */
@@ -142,7 +195,7 @@ export interface StoredTemplate {
 
 /** The settings to create a world from a user template. */
 export function templateConfig(t: UserTemplate): NewWorldConfig {
-  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name, edits: t.edits ?? [], designs: t.designs ?? [] };
+  return { template: t.base, seed: t.seed, realism: t.realism, gen: { ...t.gen }, founders: t.founders.map((f) => ({ ...f })), label: t.name, edits: t.edits ?? [], designs: t.designs ?? [], nature: t.nature ?? null };
 }
 
 export interface TraitMeta {
@@ -190,6 +243,8 @@ export interface WorldInfo {
   patch_size: number;
   /** Designed species this world knows. */
   designs?: SpeciesDesign[];
+  /** Its climate cycles and natural events, if any. */
+  nature?: NatureSettings | null;
 }
 
 export interface Status {
@@ -210,6 +265,12 @@ export interface Status {
   realism: string;
   mutation_rate: number;
   global_temp_offset: number;
+  /** Sea level relative to the start, m (climate cycles, PRD FR-W7). */
+  sea_level: number;
+  /** Bumped whenever the coastline moves. */
+  coast_rev: number;
+  /** Changes whenever biomes are recomputed. */
+  climate_rev: number;
   individual_cap: number;
 }
 
@@ -230,7 +291,7 @@ export interface SpeciesInfo {
 
 export interface SimEvent {
   year: number;
-  kind: "Info" | "Founders" | "Speciation" | "Extinction" | "Mode" | "Intervention" | "Crash" | "Adaptation";
+  kind: "Info" | "Founders" | "Speciation" | "Extinction" | "Mode" | "Intervention" | "Crash" | "Adaptation" | "Nature";
   species: number | null;
   text: string;
   /** Position in the world's chronicle (added by the worker). */
@@ -461,6 +522,8 @@ export interface FrameMsg {
   forage?: Float32Array;
   events: SimEvent[];
   speciesList?: SpeciesInfo[];
+  /** Climate cycles and natural events; sent about once a second for worlds that have them. */
+  climate?: Climate;
 }
 
 export type FromWorker =

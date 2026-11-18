@@ -110,6 +110,7 @@ impl Simulation {
                 EventKind::Intervention => "Intervention",
                 EventKind::Crash => "Crash",
                 EventKind::Adaptation => "Adaptation",
+                EventKind::Nature => "Nature",
             };
             let (id, name) = match e.species {
                 Some(id) if (id as usize) < self.species.list.len() => {

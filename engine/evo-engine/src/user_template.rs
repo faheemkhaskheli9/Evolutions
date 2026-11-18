@@ -28,8 +28,13 @@
 //! each `{ "key", "name", "description", "color", "traits": { trait key: value },
 //! "variation" }`. A template is written with the lowest version that holds it
 //! (1 without edits or designs), so older versions of the app can open it.
+//!
+//! Version 4 adds `nature`: the climate cycles and natural events (PRD FR-W7, FR-E3),
+//! `{ "glacial": { "period_years", "cooling_c", "sea_drop_m" } | absent, "droughts",
+//! "fires", "harsh_winters", "eruptions" }`.
 
 use crate::designer::{validate_designs, SpeciesDesign};
+use crate::nature::NatureSettings;
 use crate::params::Realism;
 use crate::sim::{validate_founders, validate_gen, NewWorld, Simulation};
 use crate::templates::{self, FounderGroup};
@@ -40,7 +45,7 @@ use serde::{Deserialize, Serialize};
 pub const TEMPLATE_FORMAT: &str = "evolutions-template";
 /// The newest template format version this engine reads (and writes for templates
 /// with designed species).
-pub const TEMPLATE_VERSION: u32 = 3;
+pub const TEMPLATE_VERSION: u32 = 4;
 /// Most editor strokes a template may hold.
 pub const MAX_EDITS: usize = 500;
 /// Longest name, in characters.
@@ -70,6 +75,8 @@ pub struct UserTemplate {
     pub edits: Vec<Stroke>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub designs: Vec<SpeciesDesign>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nature: Option<NatureSettings>,
 }
 
 impl UserTemplate {
@@ -95,9 +102,12 @@ impl UserTemplate {
             .filter(|d| founders.iter().any(|g| g.species == d.key))
             .cloned()
             .collect();
+        let nature = cfg.nature.clone().filter(|n| n.any());
         let t = UserTemplate {
             format: TEMPLATE_FORMAT.into(),
-            version: if !designs.is_empty() {
+            version: if nature.is_some() {
+                4
+            } else if !designs.is_empty() {
                 3
             } else if !cfg.edits.is_empty() {
                 2
@@ -115,6 +125,7 @@ impl UserTemplate {
             founders,
             edits: cfg.edits.clone(),
             designs,
+            nature,
         };
         t.validate()?;
         Ok(t)
@@ -188,6 +199,12 @@ impl UserTemplate {
             return bad("designed species need template format 3".into());
         }
         validate_designs(&self.designs).or_else(bad)?;
+        if let Some(n) = &self.nature {
+            if self.version < 4 {
+                return bad("climate cycles and natural events need template format 4".into());
+            }
+            n.validate().or_else(bad)?;
+        }
         validate_founders(&self.founders, &self.designs).or_else(bad)?;
         if !self.edits.is_empty() && self.version < 2 {
             return bad("world edits need template format 2".into());
@@ -214,6 +231,7 @@ impl UserTemplate {
             label: Some(self.name.trim().to_string()),
             edits: self.edits.clone(),
             designs: self.designs.clone(),
+            nature: self.nature.clone(),
         }
     }
 
@@ -238,6 +256,7 @@ impl Simulation {
             label: None,
             edits: self.creation_edits(),
             designs: origin.designs.clone(),
+            nature: self.nature.settings.clone(),
         };
         UserTemplate::from_new_world(&cfg, name, description)
     }
@@ -287,6 +306,7 @@ mod tests {
             label: None,
             edits: vec![],
             designs: vec![],
+            nature: None,
         }
     }
 
@@ -328,7 +348,7 @@ mod tests {
         assert!(UserTemplate::parse("{}")
             .unwrap_err()
             .contains("not an Evolutions template"));
-        assert!(edit(&|v| v["version"] = 4.into()).contains("newer version"));
+        assert!(edit(&|v| v["version"] = 5.into()).contains("newer version"));
         assert!(edit(&|v| v["name"] = "  ".into()).contains("name is empty"));
         assert!(edit(&|v| v["base"] = "mars".into()).contains("unknown base"));
         assert!(edit(&|v| v["gen"]["width"] = 2.into()).contains("world size"));
