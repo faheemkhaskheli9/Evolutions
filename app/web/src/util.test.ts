@@ -9,6 +9,11 @@ describe("formatYears", () => {
     expect(formatYears(12_500)).toBe("12.5 thousand years");
     expect(formatYears(3_400_000)).toBe("3.40 million years");
   });
+  it("shows a dash for non-finite simulation times", () => {
+    expect(formatYears(NaN)).toBe("–");
+    expect(formatYears(Infinity)).toBe("–");
+    expect(formatYears(-Infinity)).toBe("–");
+  });
 });
 
 describe("formatDate", () => {

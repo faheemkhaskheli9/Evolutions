@@ -5,6 +5,7 @@ export type RGB = [number, number, number];
 export const rgb = (c: RGB, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
 export function formatYears(y: number): string {
+  if (!Number.isFinite(y)) return "–";
   if (y < 1) return `${Math.floor(y * 365.25)} days`;
   if (y < 10_000) return `${y.toFixed(y < 100 ? 1 : 0)} years`;
   if (y < 1e6) return `${(y / 1000).toFixed(1)} thousand years`;
